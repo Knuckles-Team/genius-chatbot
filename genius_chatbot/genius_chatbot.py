@@ -38,7 +38,7 @@ class ChatBot:
         self.opt = opt
 
     def set_output_length(self, output_length):
-        self.output_length = output_length
+        self.output_length = int(output_length)
 
     def set_low_cpu_usage(self, low_cpu_usage):
         self.low_cpu_usage = low_cpu_usage
