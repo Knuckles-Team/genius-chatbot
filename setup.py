@@ -4,13 +4,15 @@
 from setuptools import setup
 from genius_chatbot.version import __version__, __author__
 from pathlib import Path
+import os
 import re
-
+from pip._internal.network.session import PipSession
+from pip._internal.req import parse_requirements
 
 readme = Path('README.md').read_text()
 version = __version__
+requirements = parse_requirements(os.path.join(os.path.dirname(__file__), 'requirements.txt'), session=PipSession())
 readme = re.sub(r"Version: [0-9]*\.[0-9]*\.[0-9][0-9]*", f"Version: {version}", readme)
-print(f"README: {readme}")
 with open("README.md", "w") as readme_file:
     readme_file.write(readme)
 description = 'Use huggingface models to create an intelligent and scalable chatbot'
@@ -27,7 +29,7 @@ setup(
     license='Unlicense',
     packages=['genius_chatbot'],
     include_package_data=True,
-    install_requires=['torch>=1.13.1', 'transformers>=4.25.1', 'accelerate>=0.15.0', 'psutil>=5.9.4'],
+    install_requires=[str(requirement.requirement) for requirement in requirements],
     py_modules=['genius_chatbot'],
     package_data={'genius_chatbot': ['genius_chatbot']},
     classifiers=[
