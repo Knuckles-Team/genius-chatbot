@@ -8,6 +8,7 @@ import sys
 import getopt
 import os
 import glob
+import nltk
 from typing import List
 from multiprocessing import Pool
 from tqdm import tqdm
@@ -32,6 +33,7 @@ from langchain.document_loaders import (
     UnstructuredPowerPointLoader,
     UnstructuredWordDocumentLoader,
 )
+nltk.download('punkt')
 
 
 class MyElmLoader(UnstructuredEmailLoader):
@@ -62,19 +64,20 @@ class ChatBot:
         self.used_memory = psutil.virtual_memory()[3]
         self.free_memory = psutil.virtual_memory()[1]
         self.used_percent = psutil.virtual_memory()[2]
+        self.persist_directory = f'{os.path.normpath(os.path.dirname(__file__))}/chromadb'
+        self.model_directory = f'{os.path.normpath(os.path.dirname(__file__))}/models'
+        self.source_directory = os.path.normpath(os.path.dirname(__file__))
         self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"
+        self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
         self.embeddings_model_name = "all-MiniLM-L6-v2"
-        self.persist_directory = f"{os.path.normpath(os.path.dirname(__file__))}/chromadb"
-        self.source_directory = os.path.normpath(os.path.dirname(__file__))
-        self.model_directory = os.path.normpath(os.path.dirname(__file__))
-        self.chunk_overlap = None
-        self.chunk_size = None
-        self.target_source_chunks = None
+        self.chunk_overlap = 50
+        self.chunk_size = 500
+        self.target_source_chunks = 4
         self.mute_stream = False
         self.hide_source = False
-        self.model_n_ctx = 1
-        self.model_n_batch = 1
+        self.model_n_ctx = 1000
+        self.model_n_batch = 8
         self.bytes = 1073741824
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
@@ -97,9 +100,12 @@ class ChatBot:
             ".txt": (TextLoader, {"encoding": "utf8"}),
             # Add more mappings for other file extensions and loaders as needed
         }
+        self.payload = None
 
-    def set_persistent_directory(self, directory):
-        self.persist_directory = directory
+    def set_directory(self, directory):
+        self.persist_directory = f'{directory}/chromadb'
+        self.model_directory = f'{directory}/models'
+        self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
             persist_directory=self.persist_directory,
@@ -124,18 +130,20 @@ class ChatBot:
         retriever = db.as_retriever(search_kwargs={"k": self.target_source_chunks})
         # activate/deactivate the streaming StdOut callback for LLMs
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
+        # Download model
+        if os.path.isfile(os.path.join(self.model_directory, self.model)):
+            print(f'Already downloaded model: {self.model_path}')
+        else:
+            print(f'Model was not found, downloading...')
+            gpt4all.GPT4All.download_model(self.model, self.model_directory)
         # Prepare the LLM
         match self.model_engine.lower():
             case "llamaccp":
-                llm = LlamaCpp(model_name=self.model, n_ctx=self.model_n_ctx, n_batch=self.model_n_batch,
+                llm = LlamaCpp(model=self.model_path, max_tokens=self.model_n_ctx, n_batch=self.model_n_batch,
                                callbacks=callbacks, verbose=False)
             case "gpt4all":
-                gpt4all.GPT4All.download_model(self.model, self.model_directory)
-                #model = gpt4all.GPT4All(model_name="ggml-gpt4all-j-v1.3-groovy")
-                llm = GPT4All(model=f'{self.model_directory}/{self.model}', n_ctx=self.model_n_ctx, backend='gptj',
-                              n_batch=self.model_n_batch, callbacks=callbacks, verbose=False)
-
-
+                llm = GPT4All(model=self.model_path, max_tokens=self.model_n_ctx, backend='gptj',
+                              n_batch=self.model_n_batch, callbacks=callbacks, verbose=True)
             case _default:
                 # raise exception if model_type is not supported
                 raise Exception(f"Model type {self.model_engine} is not supported. "
@@ -148,8 +156,8 @@ class ChatBot:
         end = time.time()
         documents = ""
         for document in docs:
-            documents = f'Sources: \n{document.page_content}\n{document.metadata["source"]}'
-        payload = {
+            documents = f'{documents}\n{document.page_content}\n{document.metadata["source"]}'
+        self.payload = {
             'model': self.model_engine,
             'embeddings_model': self.embeddings_model_name,
             'prompt': prompt,
@@ -160,9 +168,9 @@ class ChatBot:
             'batch_token': self.model_n_batch,
             'max_token_limit': self.model_n_ctx,
             'chunks': self.target_source_chunks,
-            'documents': documents
+            'sources': documents
         }
-        return payload
+        return self.payload
 
     def assimilate(self):
         # Create embeddings
@@ -254,16 +262,27 @@ class ChatBot:
 def usage():
     print(f'Usage:\n'
           f'-h | --help          [ See usage for script ]\n'
-          f'-c | --cuda          [ Use Nvidia Cuda instead of CPU ]\n'
-          f'-s | --save          [ Save model locally ]\n'
-          f'-i | --intelligence  [ Autoscale intelligence for hardware ]\n'
-          f'-d | --directory     [ Directory for model ]\n'
+          f'-c | --chunks        [ Use Nvidia Cuda instead of CPU ]\n'
+          f'-a | --assimilate    [ Assimilate knowledge from media provided in directory ]\n'
+          f'-j | --json          [ Export to JSON ]\n'
+          f'-d | --directory     [ Directory for chromadb and model storage ]\n'
           f'-o | --output-length [ Maximum output length of response ]\n'
           f'-p | --prompt        [ Prompt for chatbot ]\n'
-          f'-m | --model         [ Model to use from Huggingface ]\n\n'
-          f'Example:\n'
-          f'genius-chatbot --model "facebook/opt-66b" --output-length "500" '
-          f'--prompt "Chatbots are cool because they"')
+          f'-m | --model         [ Model to use from GPT4All ]\n'
+          f'-x | --model-engine  [ GPT4All or LlamaCPP ]\n'
+          f'\nExample:\n'
+          f'genius-chatbot\n'
+          f'\t--assimilate "/directory/of/documents"\n'
+          f'\n'
+          f'genius-chatbot\n'
+          f'\t--prompt "What is the 10th digit of Pi?"\n'
+          f'\n'
+          f'genius-chatbot\n'
+          f'\t--model "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"\n'
+          f'\t--prompt "Chatbots are cool because they"\n'
+          f'\t--model-engine "GPT4All"\n'
+          f'\t--assimilate "/directory/of/documents"\n'
+          f'\t--json\n')
 
 
 def genius_chatbot(argv):
@@ -273,10 +292,10 @@ def genius_chatbot(argv):
     json_export_flag = False
     prompt = 'Geniusbot is the smartest chatbot in existence.'
     try:
-        opts, args = getopt.getopt(argv, 'hjsb:c:d:e:a:q:p:m:t:x:',
-                                   ['help', 'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
-                                    'assimilate=', 'directory=', 'batch-token=', 'chunks=' 'embeddings-model=',
-                                    'model=', 'model-engine='])
+        opts, args = getopt.getopt(argv, 'a:b:c:d:e:hjm:p:q:st:x:',
+                                   ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=',
+                                    'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
+                                    'embeddings-model=', 'model=', 'model-engine='])
     except getopt.GetoptError:
         usage()
         sys.exit(2)
@@ -297,7 +316,7 @@ def genius_chatbot(argv):
             geniusbot_chat.target_source_chunks = int(arg)
         elif opt in ('-d', '--directory'):
             if os.path.exists(arg):
-                geniusbot_chat.set_persistent_directory(directory=str(arg))
+                geniusbot_chat.set_directory(directory=str(arg))
             else:
                 print(f'Path does not exist: {arg}')
                 sys.exit(1)
@@ -309,6 +328,8 @@ def genius_chatbot(argv):
             geniusbot_chat.embeddings_model_name = arg
         elif opt in ('-m', '--model'):
             geniusbot_chat.model = arg
+            geniusbot_chat.model_path = os.path.normpath(os.path.join(geniusbot_chat.model_directory, geniusbot_chat.model))
+            print(f"Model: {geniusbot_chat.model}")
         elif opt in ('-x', '--model-engine'):
             geniusbot_chat.model_engine = arg
             if geniusbot_chat.model_engine.lower() != "llamacpp" and geniusbot_chat.model_engine.lower() != "gpt4all":
@@ -330,11 +351,12 @@ def genius_chatbot(argv):
 
     response = "Empty"
     if run_flag:
+        geniusbot_chat.assimilate()
         print('RAM Utilization Before Loading Model')
         geniusbot_chat.check_hardware()
+        response = geniusbot_chat.chat(prompt)
         print('RAM Utilization After Loading Model')
         geniusbot_chat.check_hardware()
-        response = geniusbot_chat.chat(prompt)
 
     if json_export_flag:
         print(json.dumps(response, indent=4))
