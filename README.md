@@ -6,22 +6,22 @@ intelligence based on hardware limitations
 
 ### Usage:
 
-| Short Flag | Long Flag          | Description                                                                  |
-|------------|--------------------|------------------------------------------------------------------------------|
-| -h         | --help             | See Usage                                                                    |
-| -a         | --assimilate       | Assimilate knowledge from media provided in directory                        |
-| -b         | --batch-token      | Number of tokens per batch                                                   |
-| -c         | --chunks           | Number of chunks to use                                                      |
-| -d         | --directory        | Directory for chromadb and model storage                                     |
-| -e         | --embeddings-model | [Embeddings model](https://www.sbert.net/docs/pretrained_models.html) to use |
-| -j         | --json             | Export to JSON                                                               |
-| -p         | --prompt           | Prompt for chatbot                                                           |
-| -q         | --mute-stream      | Mute stream of generation                                                    |
-| -m         | --model            | Model to use from Huggingface                                                |
-| -p         | --prompt           | Prompt for chatbot                                                           |
-| -s         | --hide-source      | Hide source of answer                                                        |
-| -t         | --max-token-limit  | Maximum token to generate                                                    |
-| -x         | --model-engine     | GPT4All or LlamaCPP                                                          |
+| Short Flag | Long Flag          | Description                                                                     |
+|------------|--------------------|---------------------------------------------------------------------------------|
+| -h         | --help             | See Usage                                                                       |
+| -a         | --assimilate       | Assimilate knowledge from media provided in directory                           |
+| -b         | --batch-token      | Number of tokens per batch                                                      |
+| -c         | --chunks           | Number of chunks to use                                                         |
+| -d         | --directory        | Directory for chromadb and model storage                                        |
+| -e         | --embeddings-model | [Embeddings model](https://www.sbert.net/docs/pretrained_models.html) to use    |
+| -j         | --json             | Export to JSON                                                                  |
+| -p         | --prompt           | Prompt for chatbot                                                              |
+| -q         | --mute-stream      | Mute stream of generation                                                       |
+| -m         | --model            | Copy [GPT4All](https://gpt4all.io/index.html) .bin file from the Model Explorer |
+| -p         | --prompt           | Prompt for chatbot                                                              |
+| -s         | --hide-source      | Hide source of answer                                                           |
+| -t         | --max-token-limit  | Maximum token to generate                                                       |
+| -x         | --model-engine     | GPT4All or LlamaCPP                                                             |
 
 ### Example:
 Your very first time running should assimilate up to 3 documents to establish the Chroma Database. This will unlock prompting

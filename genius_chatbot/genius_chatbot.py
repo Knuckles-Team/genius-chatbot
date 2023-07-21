@@ -276,7 +276,7 @@ def usage():
           f'-j | --json             [ Export to JSON ]\n'
           f'-p | --prompt           [ Prompt for chatbot ]\n'
           f'-q | --mute-stream      [ Mute stream of generation ]\n'
-          f'-m | --model            [ Model to use from GPT4All ]\n'
+          f'-m | --model            [ Model to use from GPT4All https://gpt4all.io/index.html ]\n'
           f'-s | --hide-source      [ Hide source of answer ]\n'
           f'-t | --max-token-limit  [ Maximum token to generate ]\n'
           f'-x | --model-engine     [ GPT4All or LlamaCPP ]\n'
