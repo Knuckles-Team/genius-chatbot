@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import gpt4all
 import psutil
 import json
-from constants import CHROMA_SETTINGS
-from langchain.chains import RetrievalQA
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.vectorstores import Chroma
-from langchain.llms import GPT4All, LlamaCpp
-import os
-import argparse
 import time
 import sys
-import os
 import getopt
 import os
 import glob
@@ -20,14 +12,13 @@ from typing import List
 from multiprocessing import Pool
 from tqdm import tqdm
 from chromadb.config import Settings
-
-# Define the Chroma settings
-CHROMA_SETTINGS = Settings(
-    chroma_db_impl='duckdb+parquet',
-    persist_directory=".",
-    anonymized_telemetry=False
-)
-
+from langchain.chains import RetrievalQA
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.llms import GPT4All, LlamaCpp
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import Chroma
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.docstore.document import Document
 from langchain.document_loaders import (
     CSVLoader,
     EverNoteLoader,
@@ -41,11 +32,6 @@ from langchain.document_loaders import (
     UnstructuredPowerPointLoader,
     UnstructuredWordDocumentLoader,
 )
-
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.docstore.document import Document
 
 
 class MyElmLoader(UnstructuredEmailLoader):
@@ -70,37 +56,18 @@ class MyElmLoader(UnstructuredEmailLoader):
         return doc
 
 
-# Map file extensions to document loaders and their arguments
-LOADER_MAPPING = {
-    ".csv": (CSVLoader, {}),
-    # ".docx": (Docx2txtLoader, {}),
-    ".doc": (UnstructuredWordDocumentLoader, {}),
-    ".docx": (UnstructuredWordDocumentLoader, {}),
-    ".enex": (EverNoteLoader, {}),
-    ".eml": (MyElmLoader, {}),
-    ".epub": (UnstructuredEPubLoader, {}),
-    ".html": (UnstructuredHTMLLoader, {}),
-    ".md": (UnstructuredMarkdownLoader, {}),
-    ".odt": (UnstructuredODTLoader, {}),
-    ".pdf": (PyMuPDFLoader, {}),
-    ".ppt": (UnstructuredPowerPointLoader, {}),
-    ".pptx": (UnstructuredPowerPointLoader, {}),
-    ".txt": (TextLoader, {"encoding": "utf8"}),
-    # Add more mappings for other file extensions and loaders as needed
-}
-
-
 class ChatBot:
     def __init__(self):
         self.total_memory = psutil.virtual_memory()[0]
         self.used_memory = psutil.virtual_memory()[3]
         self.free_memory = psutil.virtual_memory()[1]
         self.used_percent = psutil.virtual_memory()[2]
-        self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0"
-        self.model_engine = "GPT4ALL"
-        self.embeddings_model_name = "all-MiniM-L6-v2"
-        self.persist_directory = os.path.normpath(os.getcwd())
-        self.source_directory = os.path.normpath(os.getcwd())
+        self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"
+        self.model_engine = "GPT4All"
+        self.embeddings_model_name = "all-MiniLM-L6-v2"
+        self.persist_directory = f"{os.path.normpath(os.path.dirname(__file__))}/chromadb"
+        self.source_directory = os.path.normpath(os.path.dirname(__file__))
+        self.model_directory = os.path.normpath(os.path.dirname(__file__))
         self.chunk_overlap = None
         self.chunk_size = None
         self.target_source_chunks = None
@@ -109,6 +76,35 @@ class ChatBot:
         self.model_n_ctx = 1
         self.model_n_batch = 1
         self.bytes = 1073741824
+        self.chroma_settings = Settings(
+            chroma_db_impl='duckdb+parquet',
+            persist_directory=self.persist_directory,
+            anonymized_telemetry=False
+        )
+        self.loader_mapping = {
+            ".csv": (CSVLoader, {}),
+            ".doc": (UnstructuredWordDocumentLoader, {}),
+            ".docx": (UnstructuredWordDocumentLoader, {}),
+            ".enex": (EverNoteLoader, {}),
+            ".eml": (MyElmLoader, {}),
+            ".epub": (UnstructuredEPubLoader, {}),
+            ".html": (UnstructuredHTMLLoader, {}),
+            ".md": (UnstructuredMarkdownLoader, {}),
+            ".odt": (UnstructuredODTLoader, {}),
+            ".pdf": (PyMuPDFLoader, {}),
+            ".ppt": (UnstructuredPowerPointLoader, {}),
+            ".pptx": (UnstructuredPowerPointLoader, {}),
+            ".txt": (TextLoader, {"encoding": "utf8"}),
+            # Add more mappings for other file extensions and loaders as needed
+        }
+
+    def set_persistent_directory(self, directory):
+        self.persist_directory = directory
+        self.chroma_settings = Settings(
+            chroma_db_impl='duckdb+parquet',
+            persist_directory=self.persist_directory,
+            anonymized_telemetry=False
+        )
 
     def check_hardware(self):
         self.total_memory = psutil.virtual_memory()[0]
@@ -124,18 +120,22 @@ class ChatBot:
         embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
         db = Chroma(persist_directory=self.persist_directory,
                     embedding_function=embeddings,
-                    client_settings=CHROMA_SETTINGS)
+                    client_settings=self.chroma_settings)
         retriever = db.as_retriever(search_kwargs={"k": self.target_source_chunks})
         # activate/deactivate the streaming StdOut callback for LLMs
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
         # Prepare the LLM
-        match self.model_engine:
-            case "LlamaCpp":
+        match self.model_engine.lower():
+            case "llamaccp":
                 llm = LlamaCpp(model_name=self.model, n_ctx=self.model_n_ctx, n_batch=self.model_n_batch,
                                callbacks=callbacks, verbose=False)
-            case "GPT4All":
-                llm = GPT4All(model_name=self.model, n_ctx=self.model_n_ctx, backend='gptj',
+            case "gpt4all":
+                gpt4all.GPT4All.download_model(self.model, self.model_directory)
+                #model = gpt4all.GPT4All(model_name="ggml-gpt4all-j-v1.3-groovy")
+                llm = GPT4All(model=f'{self.model_directory}/{self.model}', n_ctx=self.model_n_ctx, backend='gptj',
                               n_batch=self.model_n_batch, callbacks=callbacks, verbose=False)
+
+
             case _default:
                 # raise exception if model_type is not supported
                 raise Exception(f"Model type {self.model_engine} is not supported. "
@@ -172,7 +172,7 @@ class ChatBot:
             # Update and store locally vectorstore
             print(f"Appending to existing vectorstore at {self.persist_directory}")
             db = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings,
-                        client_settings=CHROMA_SETTINGS)
+                        client_settings=self.chroma_settings)
             collection = db.get()
             texts = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
             print(f"Creating embeddings. May take some minutes...")
@@ -183,16 +183,15 @@ class ChatBot:
             texts = self.process_documents()
             print(f"Creating embeddings. May take some minutes...")
             db = Chroma.from_documents(texts, embeddings, persist_directory=self.persist_directory,
-                                       client_settings=CHROMA_SETTINGS)
+                                       client_settings=self.chroma_settings)
         db.persist()
         db = None
-
-        print(f"Ingestion complete! You can now run privateGPT.py to query your documents")
+        print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
 
     def load_single_document(self, file_path: str) -> List[Document]:
         ext = "." + file_path.rsplit(".", 1)[-1]
-        if ext in LOADER_MAPPING:
-            loader_class, loader_args = LOADER_MAPPING[ext]
+        if ext in self.loader_mapping:
+            loader_class, loader_args = self.loader_mapping[ext]
             loader = loader_class(file_path, **loader_args)
             return loader.load()
 
@@ -205,7 +204,7 @@ class ChatBot:
         if ignored_files is None:
             ignored_files = []
         all_files = []
-        for ext in LOADER_MAPPING:
+        for ext in self.loader_mapping:
             all_files.extend(
                 glob.glob(os.path.join(source_dir, f"**/*{ext}"), recursive=True)
             )
@@ -298,7 +297,7 @@ def genius_chatbot(argv):
             geniusbot_chat.target_source_chunks = int(arg)
         elif opt in ('-d', '--directory'):
             if os.path.exists(arg):
-                geniusbot_chat.persist_directory = str(arg)
+                geniusbot_chat.set_persistent_directory(directory=str(arg))
             else:
                 print(f'Path does not exist: {arg}')
                 sys.exit(1)
@@ -338,9 +337,11 @@ def genius_chatbot(argv):
         response = geniusbot_chat.chat(prompt)
 
     if json_export_flag:
-        json.dumps(response, indent=4)
+        print(json.dumps(response, indent=4))
     else:
-        print(f"PAYLOAD: {response}")
+        print(f"Question: {response['prompt']}\n"
+              f"Answer: {response['answer']}\n"
+              f"Sources: {response['sources']}")
 
 
 def main():

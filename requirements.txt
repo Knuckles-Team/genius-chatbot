@@ -1,6 +1,6 @@
-langchain>=0.0.197
-gpt4all>=0.3.4
-chromadb>=0.3.23
+langchain>=0.0.238
+gpt4all>=1.0.5
+chromadb==0.3.23
 llama-cpp-python>=0.1.50
 urllib3>=2.0.2
 PyMuPDF>=1.22.3
@@ -12,3 +12,4 @@ pandoc>=2.3
 pypandoc>=1.11
 tqdm>=4.65.0
 psutil>=5.9.5
+sentence-transformers>=2.2.2
