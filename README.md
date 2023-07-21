@@ -1,5 +1,5 @@
 # Genius Chatbot
-*Version: 0.8.0*
+*Version: 0.9.0*
 
 Chatbot that uses any desired hugging face model or allows for scalable 
 intelligence based on hardware limitations
