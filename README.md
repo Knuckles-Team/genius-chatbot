@@ -50,6 +50,10 @@ Windows Prerequisites:
 
 Visual Studio Code 2022
 
+```bash
+winget install -e --id Kitware.CMake
+```
+
 Ubuntu Prerequisites:
 ```bash
 apt install -y pandoc
