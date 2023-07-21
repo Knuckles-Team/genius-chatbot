@@ -67,6 +67,7 @@ class ChatBot:
         self.persist_directory = f'{os.path.normpath(os.path.dirname(__file__))}/chromadb'
         self.model_directory = f'{os.path.normpath(os.path.dirname(__file__))}/models'
         self.source_directory = os.path.normpath(os.path.dirname(__file__))
+        self.set_directory(directory=os.path.normpath(os.path.dirname(__file__)))
         self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
