@@ -105,6 +105,11 @@ class ChatBot:
     def set_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
         self.model_directory = f'{directory}/models'
+        if os.path.isdir(self.model_directory):
+            print("Models directory exists")
+        else:
+            print(f"Making models directory: {self.model_directory}")
+            os.mkdir(self.model_directory)
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
