@@ -46,6 +46,15 @@ genius-chatbot  \
 #### Install Instructions
 Install Python Package
 
+Windows Prerequisites:
+
+Visual Studio Code 2022
+
+Ubuntu Prerequisites:
+```bash
+apt install -y pandoc
+```
+
 ```bash
 python -m pip install genius-chatbot
 ```
