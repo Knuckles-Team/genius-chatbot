@@ -24,6 +24,8 @@ intelligence based on hardware limitations
 | -x         | --model-engine     | GPT4All or LlamaCPP                                                          |
 
 ### Example:
+Your very first time running should assimilate up to 3 documents to establish the Chroma Database. This will unlock prompting
+
 ```bash
 genius-chatbot --assimilate "/directory/of/documents"
 ```
