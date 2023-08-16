@@ -9,6 +9,8 @@ import getopt
 import os
 import glob
 import nltk
+import psycopg
+from pgvector.psycopg import register_vector_async
 from typing import List
 from multiprocessing import Pool
 from tqdm import tqdm
@@ -80,6 +82,7 @@ class ChatBot:
         self.model_n_ctx = 2127
         self.model_n_batch = 9
         self.bytes = 1073741824
+        self.database_type = "ChromaDB"
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
             persist_directory=self.persist_directory,
@@ -150,6 +153,8 @@ class ChatBot:
             case "gpt4all":
                 llm = GPT4All(model=self.model_path, max_tokens=self.model_n_ctx, backend='gptj',
                               n_batch=self.model_n_batch, callbacks=callbacks, verbose=True)
+            case "external":
+                llm = "EXTERNAL LLM OBJECT, MUST FIGURE OUT HOW TO IMPORT"
             case _default:
                 # raise exception if model_type is not supported
                 raise Exception(f"Model type {self.model_engine} is not supported. "
@@ -177,6 +182,14 @@ class ChatBot:
             'sources': documents
         }
         return self.payload
+
+    def pgvector_poc(self):
+        conn = psycopg.connect(DSN, cursor_factory=ClientCursor)
+        await register_vector_async(conn)
+        embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
+        conn.execute('INSERT INTO item (embedding) VALUES (%s)', (embeddings,))
+
+        conn.execute('SELECT * FROM item ORDER BY embedding <-> %s LIMIT 5', (embeddings,)).fetchall()
 
     def assimilate(self):
         # Create embeddings
@@ -302,8 +315,8 @@ def genius_chatbot(argv):
     json_export_flag = False
     prompt = 'Geniusbot is the smartest chatbot in existence.'
     try:
-        opts, args = getopt.getopt(argv, 'a:b:c:d:e:hjm:p:q:st:x:',
-                                   ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=',
+        opts, args = getopt.getopt(argv, 'a:b:c:d:e:g:hjm:p:q:st:x:',
+                                   ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=', 'database=',
                                     'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
                                     'embeddings-model=', 'model=', 'model-engine='])
     except getopt.GetoptError:
@@ -330,12 +343,14 @@ def genius_chatbot(argv):
             else:
                 print(f'Path does not exist: {arg}')
                 sys.exit(1)
+        elif opt in ('-e', '--embeddings-model'):
+            geniusbot_chat.embeddings_model_name = arg
+        elif opt in ('-g', '--database'):
+            geniusbot_chat.database_type = arg
         elif opt in ('-j', '--json'):
             geniusbot_chat.json_export_flag = True
             geniusbot_chat.hide_source_flag = True
             geniusbot_chat.mute_stream_flag = True
-        elif opt in ('-e', '--embeddings-model'):
-            geniusbot_chat.embeddings_model_name = arg
         elif opt in ('-m', '--model'):
             geniusbot_chat.model = arg
             geniusbot_chat.model_path = os.path.normpath(os.path.join(geniusbot_chat.model_directory, geniusbot_chat.model))
