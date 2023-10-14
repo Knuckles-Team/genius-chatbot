@@ -23,6 +23,8 @@ from langchain.llms import GPT4All, LlamaCpp
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.vectorstores.pgvector import PGVector
 from langchain.docstore.document import Document
 from langchain.document_loaders import (
     CSVLoader,
@@ -69,12 +71,15 @@ class ChatBot:
         self.free_memory = psutil.virtual_memory()[1]
         self.used_percent = psutil.virtual_memory()[2]
         self.script_path = os.path.normpath(os.path.dirname(__file__))
-        self.persist_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
+        self.module_path = os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))
+        self.persist_directory = (f'{self.module_path}'
                                   f'/chromadb')
-        self.model_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
+        self.model_directory = (f'{self.module_path}'
                                 f'/models')
-        self.source_directory = os.path.normpath(os.path.dirname(__file__))
-        self.model = "nous-hermes-13b.ggmlv3.q4_0.bin"
+        self.source_directory = self.module_path
+        self.openai_api_base = ""
+        self.openai_api_key = False
+        self.model = "llama-2-7b-chat.ggmlv3.q4_0.bin" #"nous-hermes-13b.ggmlv3.q4_0.bin"
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
         self.embeddings_model_name = "all-mpnet-base-v2"
@@ -89,7 +94,14 @@ class ChatBot:
         self.bytes = 1073741824
         self.collection = None
         self.collection_name = "genius"
+        self.vectorstore = "chromadb"
         self.chromadb_client = None
+        self.pgvector_username = ""
+        self.pgvector_password = ""
+        self.pgvector_host = "localhost"
+        self.pgvector_port = "5432"
+        self.pgvector_driver = "psycopg2"
+        self.pgvector_database = ""
         self.chroma_settings = Settings(
             persist_directory=self.persist_directory,
             anonymized_telemetry=False
@@ -111,6 +123,7 @@ class ChatBot:
             # Add more mappings for other file extensions and loaders as needed
         }
         self.payload = None
+        self.assimilate()
 
     def set_chromadb_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
@@ -140,9 +153,23 @@ class ChatBot:
                      f'\tTotal RAM: {round(float(self.total_memory / self.bytes), 2)} GB\n\n')
 
     def chat(self, prompt: str) -> dict:
-        llm = None
-        db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings,
-                    client_settings=self.chroma_settings, client=self.chromadb_client)
+        db = None
+        if self.vectorstore == "chromadb":
+            db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings,
+                        client_settings=self.chroma_settings, client=self.chromadb_client)
+        elif self.vectorstore == "pgvector":
+            db = PGVector(
+                collection_name=self.collection_name,
+                connection_string=PGVector.connection_string_from_db_params(
+                    driver=self.pgvector_driver,
+                    host=self.pgvector_host,
+                    port=int(self.pgvector_port),
+                    database=self.pgvector_database,
+                    user=self.pgvector_username,
+                    password=self.pgvector_password,
+                ),
+                embedding_function=self.embeddings,
+            )
         retriever = db.as_retriever(search_kwargs={"k": self.target_source_chunks})
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
         # Download model
@@ -191,28 +218,62 @@ class ChatBot:
         return self.payload
 
     def assimilate(self):
-        chromadb_client = chromadb.PersistentClient(settings=self.chroma_settings , path=self.persist_directory)
-        if self.does_vectorstore_exist():
-            # Update and store locally vectorstore
-            print(f"Appending to existing vectorstore at {self.persist_directory}")
-            db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings, client_settings=self.chroma_settings, client=chromadb_client)
-            collection = db.get()
-            documents = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
-            print(f"Creating embeddings. May take some minutes...")
-            for batched_chromadb_insertion in self.batch_chromadb_insertions(chromadb_client, documents):
-                db.add_documents(batched_chromadb_insertion)
-        else:
-            # Create and store locally vectorstore
-            print("Creating new vectorstore")
-            documents = self.process_documents()
-            print(f"Creating embeddings. May take some minutes...")
-            # Create the db with the first batch of documents to insert
-            batched_chromadb_insertions = self.batch_chromadb_insertions(chromadb_client, documents)
-            first_insertion = next(batched_chromadb_insertions)
-            db = Chroma.from_documents(first_insertion, self.embeddings, persist_directory=self.persist_directory, client_settings=self.chroma_settings, client=chromadb_client)
-            # Add the rest of batches of documents
-            for batched_chromadb_insertion in batched_chromadb_insertions:
-                db.add_documents(batched_chromadb_insertion)
+        if self.vectorstore == "chromadb":
+            chromadb_client = chromadb.PersistentClient(settings=self.chroma_settings , path=self.persist_directory)
+            if self.does_vectorstore_exist():
+                # Update and store locally vectorstore
+                print(f"Appending to existing vectorstore at {self.persist_directory}")
+                db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings,
+                            client_settings=self.chroma_settings, client=chromadb_client)
+                collection = db.get()
+                documents = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
+                print(f"Creating embeddings. May take some minutes...")
+                for batched_chromadb_insertion in self.batch_chromadb_insertions(chromadb_client, documents):
+                    db.add_documents(batched_chromadb_insertion)
+            else:
+                # Create and store locally vectorstore
+                print("Creating new vectorstore")
+                documents = self.process_documents()
+                print(f"Creating embeddings. May take some minutes...")
+                # Create the db with the first batch of documents to insert
+                batched_chromadb_insertions = self.batch_chromadb_insertions(chromadb_client, documents)
+                first_insertion = next(batched_chromadb_insertions)
+                db = Chroma.from_documents(first_insertion, self.embeddings, persist_directory=self.persist_directory,
+                                           client_settings=self.chroma_settings, client=chromadb_client)
+                # Add the rest of batches of documents
+                for batched_chromadb_insertion in batched_chromadb_insertions:
+                    db.add_documents(batched_chromadb_insertion)
+        elif self.vectorstore == "pgvector":
+            if self.does_vectorstore_exist():
+                documents = self.process_documents()
+                db = PGVector(
+                    collection_name=self.collection_name,
+                    connection_string=PGVector.connection_string_from_db_params(
+                        driver=self.pgvector_driver,
+                        host=self.pgvector_host,
+                        port=int(self.pgvector_port),
+                        database=self.pgvector_database,
+                        user=self.pgvector_username,
+                        password=self.pgvector_password,
+                    ),
+                    embedding_function=self.embeddings,
+                )
+                db.add_documents(documents)
+            else:
+                documents = self.process_documents()
+                PGVector.from_documents(
+                    embedding=self.embeddings,
+                    documents=documents,
+                    collection_name=self.collection_name,
+                    connection_string=PGVector.connection_string_from_db_params(
+                        driver=self.pgvector_driver,
+                        host=self.pgvector_host,
+                        port=int(self.pgvector_port),
+                        database=self.pgvector_database,
+                        user=self.pgvector_username,
+                        password=self.pgvector_password,
+                    ),
+                )
 
     def load_single_document(self, file_path: str) -> List[Document]:
         ext = "." + file_path.rsplit(".", 1)[-1].lower()
@@ -263,7 +324,7 @@ class ChatBot:
         documents = self.load_documents(self.source_directory, ignored_files)
         if not documents:
             print("No new documents to load")
-            exit(0)
+            return []
         print(f"Loaded {len(documents)} new documents from {self.source_directory}")
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         documents = text_splitter.split_documents(documents)
@@ -283,10 +344,28 @@ class ChatBot:
         """
         Checks if vectorstore exists
         """
-        db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
-        if not db.get()['documents']:
-            return False
-        return True
+        if self.vectorstore == "chromadb":
+            db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
+            if not db.get()['documents']:
+                return False
+            return True
+        elif self.vectorstore == "pgvector":
+            db = PGVector(
+                collection_name=self.collection_name,
+                connection_string=PGVector.connection_string_from_db_params(
+                    driver=self.pgvector_driver,
+                    host=self.pgvector_host,
+                    port=int(self.pgvector_port),
+                    database=self.pgvector_database,
+                    user=self.pgvector_username,
+                    password=self.pgvector_password,
+                ),
+                embedding_function=self.embeddings,
+            )
+            if not db.get()['documents']:
+                return False
+            return True
+
 
 
 def usage():
@@ -303,7 +382,7 @@ def usage():
           f'-m | --model            [ Model to use from GPT4All https://gpt4all.io/index.html ]\n'
           f'-s | --hide-source      [ Hide source of answer ]\n'
           f'-t | --max-token-limit  [ Maximum token to generate ]\n'
-          f'-x | --model-engine     [ GPT4All or LlamaCPP ]\n'
+          f'-x | --model-engine     [ GPT4All, LlamaCPP, or OpenAI ]\n'
           f'\nExample:\n'
           f'genius-chatbot\n'
           f'\t--assimilate "/directory/of/documents"\n'
@@ -327,10 +406,14 @@ def genius_chatbot(argv):
     prompt = 'Geniusbot is the smartest chatbot in existence.'
     try:
         opts, args = getopt.getopt(argv, 'a:b:c:d:e:hjm:p:q:st:x:',
-                                   ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=',
-                                    'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
-                                    'embeddings-model=', 'model=', 'model-engine=', 'model-directory=', 'openai-token=',
-                                    'openai-api='])
+                                   ['help', 'assimilate=', 'prompt=', 'json',
+                                    'batch-token=', 'chunks=', 'max-token-limit=',
+                                    'hide-source', 'mute-stream',
+                                    'embeddings-model=', 'model=', 'model-engine=',
+                                    'model-directory=', 'persistent-directory=',
+                                    'openai-token=', 'openai-api=',
+                                    'pgvector-username=','pgvector-password=','pgvector-host=','pgvector-port=',
+                                    'pgvector-driver=','pgvector-database='])
     except getopt.GetoptError as e:
         usage()
         logging.error("Error: {e}\nExiting...")
@@ -351,7 +434,7 @@ def genius_chatbot(argv):
             geniusbot_chat.model_n_batch = int(arg)
         elif opt in ('-c', '--chunks'):
             geniusbot_chat.target_source_chunks = int(arg)
-        elif opt in ('-d', '--directory'):
+        elif opt in ('-d', '--persistent-directory'):
             geniusbot_chat.set_chromadb_directory(directory=str(arg))
         elif opt in ('-j', '--json'):
             geniusbot_chat.json_export_flag = True
@@ -359,9 +442,6 @@ def genius_chatbot(argv):
             geniusbot_chat.mute_stream_flag = True
         elif opt in ('-e', '--embeddings-model'):
             geniusbot_chat.embeddings_model_name = arg
-            # geniusbot_chat.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
-            #     model_name=geniusbot_chat.embeddings_model_name
-            # )
             geniusbot_chat.embeddings = HuggingFaceEmbeddings(model_name=geniusbot_chat.embeddings_model_name)
         elif opt in ('-m', '--model'):
             geniusbot_chat.model = arg
@@ -370,11 +450,15 @@ def genius_chatbot(argv):
             print(f"Model: {geniusbot_chat.model}")
         elif opt == '--openai-token':
             os.environ["OPENAI_API_KEY"] = arg
+            geniusbot_chat.openai_api_key = True
         elif opt == '--openai-api':
             os.environ["OPENAI_API_BASE"] = arg
+            geniusbot_chat.openai_api_base = arg
         elif opt in ('-x', '--model-engine'):
             geniusbot_chat.model_engine = arg
-            if geniusbot_chat.model_engine.lower() != "llamacpp" and geniusbot_chat.model_engine.lower() != "gpt4all":
+            if (geniusbot_chat.model_engine.lower() != "llamacpp"
+                    and geniusbot_chat.model_engine.lower() != "gpt4all"
+                    and geniusbot_chat.model_engine.lower() != "openai"):
                 logging.error("model type not supported")
                 usage()
                 sys.exit(2)
@@ -385,6 +469,18 @@ def genius_chatbot(argv):
             run_flag = True
         elif opt in ('-s', '--hide-source'):
             geniusbot_chat.hide_source_flag = True
+        elif opt == '--pgvector-username':
+            geniusbot_chat.pgvector_username = arg
+        elif opt == '--pgvector-password':
+            geniusbot_chat.pgvector_password = arg
+        elif opt == '--pgvector-host':
+            geniusbot_chat.pgvector_host = arg
+        elif opt == '--pgvector-port':
+            geniusbot_chat.pgvector_port = arg
+        elif opt == '--pgvector-driver':
+            geniusbot_chat.pgvector_driver = arg
+        elif opt == '--pgvector-database':
+            geniusbot_chat.pgvector_database = arg
         elif opt in ('-t', '--max-token-limit'):
             geniusbot_chat.model_n_ctx = int(arg)
         elif opt in ('-q', '--mute-stream'):
@@ -392,6 +488,9 @@ def genius_chatbot(argv):
 
     if assimilate_flag:
         geniusbot_chat.assimilate()
+
+    if geniusbot_chat.openai_api_key:
+        geniusbot_chat.embeddings = OpenAIEmbeddings()
 
     if run_flag:
         if not geniusbot_chat.does_vectorstore_exist():
@@ -404,9 +503,9 @@ def genius_chatbot(argv):
         if json_export_flag:
             print(json.dumps(response, indent=4))
         else:
-            print(f"Question: {response['prompt']}\n"
+            print(f"\n\nQuestion: {response['prompt']}\n"
                   f"Answer: {response['answer']}\n"
-                  f"Sources: {response['sources']}")
+                  f"Sources: {response['sources']}\n\n")
             logging.info('RAM Utilization After Loading Model')
         geniusbot_chat.check_hardware()
 

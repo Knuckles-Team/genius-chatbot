@@ -14,3 +14,8 @@ psutil==5.9.5
 sentence-transformers==2.2.2
 appengine-python-standard==1.1.4
 EbookLib==0.18
+pgvector==0.2.3
+openai==0.28.1
+psycopg2-binary==2.9.9
+tiktoken==0.5.1
+unstructured[all-docs]==0.10.22
