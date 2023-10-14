@@ -72,7 +72,7 @@ class ChatBot:
         self.script_path = os.path.normpath(os.path.dirname(__file__))
         self.persist_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                   f'/chromadb')
-        #self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
+        self.chromadb_client = None
         self.model_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                 f'/models')
         self.source_directory = os.path.normpath(os.path.dirname(__file__))
@@ -199,6 +199,7 @@ class ChatBot:
 
     def assimilate(self):
         # Create embeddings
+        #self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
         if self.does_vectorstore_exist():
             self.collection = self.chromadb_client.get_or_create_collection(name="genius",
                                                                             embedding_function=self.embeddings)
@@ -218,15 +219,24 @@ class ChatBot:
             self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
             print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
 
-    def load_single_document(self, file: str) -> [List[Document], str, dict]:
-        ext = "." + file.rsplit(".", 1)[-1].lower()
+    def load_single_document(self, file_path: str) -> List[Document]:
+        ext = "." + file_path.rsplit(".", 1)[-1].lower()
         if ext in self.loader_mapping:
             loader_class, loader_args = self.loader_mapping[ext]
-            loader = loader_class(file, **loader_args)
-            processed_docs = loader.load()
-            md5_checksum = self.generate_md5_checksum(file=file)
-            return processed_docs, md5_checksum, {"source": file, "date": time.time(), "md5": md5_checksum}
+            loader = loader_class(file_path, **loader_args)
+            return loader.load()
+
         raise ValueError(f"Unsupported file extension '{ext}'")
+
+    # def load_single_document(self, file: str) -> [List[Document], str, dict]:
+    #     ext = "." + file.rsplit(".", 1)[-1].lower()
+    #     if ext in self.loader_mapping:
+    #         loader_class, loader_args = self.loader_mapping[ext]
+    #         loader = loader_class(file, **loader_args)
+    #         processed_docs = loader.load()
+    #         md5_checksum = self.generate_md5_checksum(file=file)
+    #         return processed_docs, md5_checksum, {"source": file, "date": time.time(), "md5": md5_checksum}
+    #     raise ValueError(f"Unsupported file extension '{ext}'")
 
     def load_documents(self, source_dir: str, ignored_files: List[str] = []):
         """
@@ -241,16 +251,18 @@ class ChatBot:
                 glob.glob(os.path.join(source_dir, f"**/*{ext.upper()}"), recursive=True)
             )
         filtered_files = [file_path for file_path in all_files if file_path not in ignored_files]
-        documents = []
-        id_md5 = []
-        metadatas = []
+
+        # id_md5 = []
+        # metadatas = []
 
         with Pool(processes=os.cpu_count()) as pool:
+            documents = []
             with tqdm(total=len(filtered_files), desc='Loading new documents', ncols=80) as pbar:
                 for i, docs in enumerate(pool.imap_unordered(self.load_single_document, filtered_files)):
-                    documents.extend(docs[0])
-                    id_md5.extend(docs[1])
-                    metadatas.extend(docs[2])
+                    documents.extend(docs)
+                    # documents.extend(docs[0])
+                    # id_md5.extend(docs[1])
+                    # metadatas.extend(docs[2])
                     pbar.update()
 
 
@@ -281,35 +293,45 @@ class ChatBot:
             md5_checksum = hashlib.md5(data).hexdigest()
         return md5_checksum
 
-    def process_documents(self):
+    def process_documents(self, ignored_files: List[str] = []) -> List[Document]:
         """
         Get Collection
         Compare Loaded Documents with Collection
         Load documents.
         """
+        print(f"Loading documents from {self.source_directory}")
+        documents = self.load_documents(self.source_directory, ignored_files)
+        if not documents:
+            print("No new documents to load")
+            exit(0)
+        print(f"Loaded {len(documents)} new documents from {self.source_directory}")
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        documents = text_splitter.split_documents(documents)
+        print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
+        return documents
         # print(f"Loading documents from {source_directory}")
         # documents = load_documents(source_directory, ignored_files)
         # if not documents:
         #     print("No new documents to load")
-        #     exit(0)
+        #     return []
         # print(f"Loaded {len(documents)} new documents from {source_directory}")
         # text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         # documents = text_splitter.split_documents(documents)
         # print(f"Split into {len(documents)} chunks of text (max. {chunk_size} tokens each)")
         # return documents
 
-        print(f"Loading documents from {self.source_directory}")
-        ids, documents, metadatas = self.load_documents(self.source_directory)
-        if not documents:
-            print("No new documents found")
-            return ids, documents, metadatas
-        print(f"Loaded {len(documents)} new documents from {self.source_directory}")
-
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
-        documents = text_splitter.split_documents(documents)
-        print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
-
-        return ids, documents, metadatas
+        # print(f"Loading documents from {self.source_directory}")
+        # ids, documents, metadatas = self.load_documents(self.source_directory)
+        # if not documents:
+        #     print("No new documents found")
+        #     return ids, documents, metadatas
+        # print(f"Loaded {len(documents)} new documents from {self.source_directory}")
+        #
+        # text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        # documents = text_splitter.split_documents(documents)
+        # print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
+        #
+        # return ids, documents, metadatas
 
     def batch_chromadb_insertions(chroma_client: API, documents: List[Document]) -> List[Document]:
         """
