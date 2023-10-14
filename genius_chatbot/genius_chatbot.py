@@ -10,6 +10,7 @@ import os
 import glob
 import hashlib
 import chromadb
+import logging
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from typing import List
@@ -34,6 +35,7 @@ from langchain.document_loaders import (
     UnstructuredPowerPointLoader,
     UnstructuredWordDocumentLoader,
 )
+
 
 class MyEmlLoader(UnstructuredEmailLoader):
     """Wrapper to fallback to text/plain when default does not work"""
@@ -113,7 +115,7 @@ class ChatBot:
     def set_chromadb_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
         if not os.path.isdir(self.persist_directory):
-            print(f"Making chromadb directory: {self.persist_directory}")
+            logging.info(f"Making chromadb directory: {self.persist_directory}")
             os.mkdir(self.persist_directory)
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
@@ -125,7 +127,7 @@ class ChatBot:
     def set_models_directory(self, directory):
         self.model_directory = f'{directory}/models'
         if not os.path.isdir(self.model_directory):
-            print(f"Making models directory: {self.model_directory}")
+            logging.info(f"Making models directory: {self.model_directory}")
             os.mkdir(self.model_directory)
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
 
@@ -134,19 +136,15 @@ class ChatBot:
         self.used_memory = psutil.virtual_memory()[3]
         self.free_memory = psutil.virtual_memory()[1]
         self.used_percent = psutil.virtual_memory()[2]
-        print(f'RAM Utilization: {round(self.used_percent, 2)}%\n'
-              f'\tUsed  RAM: {round(float(self.used_memory / self.bytes), 2)} GB\n'
-              f'\tFree  RAM: {round(float(self.free_memory / self.bytes), 2)} GB\n'
-              f'\tTotal RAM: {round(float(self.total_memory / self.bytes), 2)} GB\n\n')
+        logging.info(f'RAM Utilization: {round(self.used_percent, 2)}%\n'
+                     f'\tUsed  RAM: {round(float(self.used_memory / self.bytes), 2)} GB\n'
+                     f'\tFree  RAM: {round(float(self.free_memory / self.bytes), 2)} GB\n'
+                     f'\tTotal RAM: {round(float(self.total_memory / self.bytes), 2)} GB\n\n')
 
     def chat(self, prompt):
-
+        llm = None
         self.collection = self.chromadb_client.get_or_create_collection(name=self.collection_name,
                                                                         embedding_function=self.embeddings)
-
-        # Chroma(persist_directory=self.persist_directory,
-        #                             embedding_function=embeddings,
-        #                             client_settings=self.chroma_settings)
         retriever = self.collection.as_retriever(search_kwargs={"k": self.target_source_chunks})
         # activate/deactivate the streaming StdOut callback for LLMs
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
@@ -164,6 +162,8 @@ class ChatBot:
             case "gpt4all":
                 llm = GPT4All(model=self.model_path, max_tokens=self.model_n_ctx, backend='gptj',
                               n_batch=self.model_n_batch, callbacks=callbacks, verbose=True)
+            case "openai":
+                pass
             case _default:
                 # raise exception if model_type is not supported
                 raise Exception(f"Model type {self.model_engine} is not supported. "
@@ -195,17 +195,8 @@ class ChatBot:
     def assimilate(self):
         # Create embeddings
         if self.does_vectorstore_exist():
-            # Update and store locally vectorstore
-            # print(f"Appending to existing vectorstore at {self.persist_directory}")
-            # db = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings,
-            #             client_settings=self.chroma_settings)
-            # collection = db.get()
-            # texts = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
-            # print(f"Creating embeddings. May take some minutes...")
-            # db.add_documents(texts)
             self.collection = self.chromadb_client.get_or_create_collection(name="genius",
                                                                             embedding_function=self.embeddings)
-            #ids, documents, metadatas = self.process_documents([metadata['source'] for metadata in self.collection['metadatas']])
             ids, documents, metadatas = self.process_documents()
             if documents:
                 self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
@@ -216,7 +207,7 @@ class ChatBot:
             # Create and store locally vectorstore
             print("Creating new vectorstore")
             ids, documents, metadatas = self.process_documents()
-            print(f"Creating embeddings. May take some minutes...")
+            print(f"Creating embeddings. May take a few minutes...")
             self.collection = self.chromadb_client.get_or_create_collection(name="genius",
                                                                             embedding_function=self.embeddings)
             self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
@@ -254,7 +245,8 @@ class ChatBot:
                 loader = loader_class(file, **loader_args)
                 processed_docs = loader.load()
                 md5_checksum = self.generate_md5_checksum(file=file)
-                print(f"Checking if document was already found in collection {len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids'])}")
+                print(
+                    f"Checking if document was already found in collection {len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids'])}")
                 if len(self.collection.query(query_texts=[file], n_results=1)['ids']) > 0:
                     print(f"Document with same file name already exists, checking MD5 checksum for {file}...")
                     if len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids']) > 0:
@@ -289,9 +281,6 @@ class ChatBot:
             print("No new documents found")
             return ids, documents, metadatas
         print(f"Loaded {len(documents)} new documents from {self.source_directory}")
-        # text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
-        # texts = text_splitter.split_documents(documents)
-        # print(f"Split into {len(texts)} chunks of text (max. {self.chunk_size} tokens each)")
         return ids, documents, metadatas
 
     def does_vectorstore_exist(self) -> bool:
@@ -299,20 +288,9 @@ class ChatBot:
         Checks if vectorstore exists
         """
         if os.path.isfile(os.path.join(self.persist_directory, 'chroma.sqlite3')):
-            # if len(next(os.walk('dir_name'))[1]) > 1:
             return True
         else:
             return False
-
-        # if os.path.exists(os.path.join(self.persist_directory, 'index')):
-        #     if os.path.exists(os.path.join(self.persist_directory, 'chroma-collections.parquet')) \
-        #             and os.path.exists(os.path.join(self.persist_directory, 'chroma-embeddings.parquet')):
-        #         list_index_files = glob.glob(os.path.join(self.persist_directory, 'index/*.bin'))
-        #         list_index_files += glob.glob(os.path.join(self.persist_directory, 'index/*.pkl'))
-        #         # At least 3 documents are needed in a working vectorstore
-        #         if len(list_index_files) > 3:
-        #             return True
-        # return False
 
 
 def usage():
@@ -356,19 +334,21 @@ def genius_chatbot(argv):
                                    ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=',
                                     'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
                                     'embeddings-model=', 'model=', 'model-engine=', 'model-directory='])
-    except getopt.GetoptError:
+    except getopt.GetoptError as e:
         usage()
+        logging.error("Error: {e}\nExiting...")
         sys.exit(2)
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage()
+            logging.error("Exiting...")
             sys.exit()
         elif opt in ('-a', '--assimilate'):
             if os.path.exists(arg):
                 geniusbot_chat.source_directory = str(arg)
                 assimilate_flag = True
             else:
-                print(f'Path does not exist: {arg}')
+                logging.error(f'Path does not exist: {arg}')
                 sys.exit(1)
         elif opt in ('-b', '--batch-token'):
             geniusbot_chat.model_n_batch = int(arg)
@@ -387,12 +367,13 @@ def genius_chatbot(argv):
             )
         elif opt in ('-m', '--model'):
             geniusbot_chat.model = arg
-            geniusbot_chat.model_path = os.path.normpath(os.path.join(geniusbot_chat.model_directory, geniusbot_chat.model))
+            geniusbot_chat.model_path = os.path.normpath(
+                os.path.join(geniusbot_chat.model_directory, geniusbot_chat.model))
             print(f"Model: {geniusbot_chat.model}")
         elif opt in ('-x', '--model-engine'):
             geniusbot_chat.model_engine = arg
             if geniusbot_chat.model_engine.lower() != "llamacpp" and geniusbot_chat.model_engine.lower() != "gpt4all":
-                print("model type not supported")
+                logging.error("model type not supported")
                 usage()
                 sys.exit(2)
         elif opt == '--model-directory':
@@ -412,7 +393,7 @@ def genius_chatbot(argv):
 
     if run_flag:
         geniusbot_chat.assimilate()
-        print('RAM Utilization Before Loading Model')
+        logging.info('RAM Utilization Before Loading Model')
         geniusbot_chat.check_hardware()
         response = geniusbot_chat.chat(prompt)
         if json_export_flag:
@@ -421,7 +402,7 @@ def genius_chatbot(argv):
             print(f"Question: {response['prompt']}\n"
                   f"Answer: {response['answer']}\n"
                   f"Sources: {response['sources']}")
-            print('RAM Utilization After Loading Model')
+            logging.info('RAM Utilization After Loading Model')
         geniusbot_chat.check_hardware()
 
 
