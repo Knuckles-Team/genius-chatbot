@@ -8,17 +8,18 @@ import sys
 import getopt
 import os
 import glob
-import nltk
-from typing import List
-from multiprocessing import Pool
-from tqdm import tqdm
+import hashlib
+import chromadb
 from chromadb.config import Settings
+from chromadb.utils import embedding_functions
+from typing import List
+from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.llms import GPT4All, LlamaCpp
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import Chroma
-from langchain.embeddings import HuggingFaceEmbeddings
+
 from langchain.docstore.document import Document
 from langchain.document_loaders import (
     CSVLoader,
@@ -33,10 +34,8 @@ from langchain.document_loaders import (
     UnstructuredPowerPointLoader,
     UnstructuredWordDocumentLoader,
 )
-nltk.download('punkt')
 
-
-class MyElmLoader(UnstructuredEmailLoader):
+class MyEmlLoader(UnstructuredEmailLoader):
     """Wrapper to fallback to text/plain when default does not work"""
 
     def load(self) -> List[Document]:
@@ -64,14 +63,20 @@ class ChatBot:
         self.used_memory = psutil.virtual_memory()[3]
         self.free_memory = psutil.virtual_memory()[1]
         self.used_percent = psutil.virtual_memory()[2]
-        self.persist_directory = f'{os.path.normpath(os.path.dirname(__file__))}/chromadb'
-        self.model_directory = f'{os.path.normpath(os.path.dirname(__file__))}/models'
+        self.script_path = os.path.normpath(os.path.dirname(__file__))
+        self.persist_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
+                                  f'/chromadb')
+        self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
+        self.model_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
+                                f'/models')
         self.source_directory = os.path.normpath(os.path.dirname(__file__))
         self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
         self.embeddings_model_name = "all-MiniLM-L6-v2"
-        self.set_directory(directory=os.path.normpath(os.path.dirname(__file__)))
+        self.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=self.embeddings_model_name
+        )
         self.chunk_overlap = 69
         self.chunk_size = 639
         self.target_source_chunks = 6
@@ -80,6 +85,8 @@ class ChatBot:
         self.model_n_ctx = 2127
         self.model_n_batch = 9
         self.bytes = 1073741824
+        self.collection = None
+        self.collection_name = "genius"
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
             persist_directory=self.persist_directory,
@@ -90,7 +97,7 @@ class ChatBot:
             ".doc": (UnstructuredWordDocumentLoader, {}),
             ".docx": (UnstructuredWordDocumentLoader, {}),
             ".enex": (EverNoteLoader, {}),
-            ".eml": (MyElmLoader, {}),
+            ".eml": (MyEmlLoader, {}),
             ".epub": (UnstructuredEPubLoader, {}),
             ".html": (UnstructuredHTMLLoader, {}),
             ".md": (UnstructuredMarkdownLoader, {}),
@@ -103,20 +110,24 @@ class ChatBot:
         }
         self.payload = None
 
-    def set_directory(self, directory):
+    def set_chromadb_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
-        self.model_directory = f'{directory}/models'
-        if os.path.isdir(self.model_directory):
-            print("Models directory exists")
-        else:
-            print(f"Making models directory: {self.model_directory}")
-            os.mkdir(self.model_directory)
-        self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
+        if not os.path.isdir(self.persist_directory):
+            print(f"Making chromadb directory: {self.persist_directory}")
+            os.mkdir(self.persist_directory)
         self.chroma_settings = Settings(
             chroma_db_impl='duckdb+parquet',
             persist_directory=self.persist_directory,
             anonymized_telemetry=False
         )
+        self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
+
+    def set_models_directory(self, directory):
+        self.model_directory = f'{directory}/models'
+        if not os.path.isdir(self.model_directory):
+            print(f"Making models directory: {self.model_directory}")
+            os.mkdir(self.model_directory)
+        self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
 
     def check_hardware(self):
         self.total_memory = psutil.virtual_memory()[0]
@@ -129,11 +140,14 @@ class ChatBot:
               f'\tTotal RAM: {round(float(self.total_memory / self.bytes), 2)} GB\n\n')
 
     def chat(self, prompt):
-        embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
-        db = Chroma(persist_directory=self.persist_directory,
-                    embedding_function=embeddings,
-                    client_settings=self.chroma_settings)
-        retriever = db.as_retriever(search_kwargs={"k": self.target_source_chunks})
+
+        self.collection = self.chromadb_client.get_or_create_collection(name=self.collection_name,
+                                                                        embedding_function=self.embeddings)
+
+        # Chroma(persist_directory=self.persist_directory,
+        #                             embedding_function=embeddings,
+        #                             client_settings=self.chroma_settings)
+        retriever = self.collection.as_retriever(search_kwargs={"k": self.target_source_chunks})
         # activate/deactivate the streaming StdOut callback for LLMs
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
         # Download model
@@ -180,27 +194,33 @@ class ChatBot:
 
     def assimilate(self):
         # Create embeddings
-        embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
-
         if self.does_vectorstore_exist():
             # Update and store locally vectorstore
-            print(f"Appending to existing vectorstore at {self.persist_directory}")
-            db = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings,
-                        client_settings=self.chroma_settings)
-            collection = db.get()
-            texts = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
-            print(f"Creating embeddings. May take some minutes...")
-            db.add_documents(texts)
+            # print(f"Appending to existing vectorstore at {self.persist_directory}")
+            # db = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings,
+            #             client_settings=self.chroma_settings)
+            # collection = db.get()
+            # texts = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
+            # print(f"Creating embeddings. May take some minutes...")
+            # db.add_documents(texts)
+            self.collection = self.chromadb_client.get_or_create_collection(name="genius",
+                                                                            embedding_function=self.embeddings)
+            #ids, documents, metadatas = self.process_documents([metadata['source'] for metadata in self.collection['metadatas']])
+            ids, documents, metadatas = self.process_documents()
+            if documents:
+                self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+                print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
+            else:
+                print("Nothing to assimilate!")
         else:
             # Create and store locally vectorstore
             print("Creating new vectorstore")
-            texts = self.process_documents()
+            ids, documents, metadatas = self.process_documents()
             print(f"Creating embeddings. May take some minutes...")
-            db = Chroma.from_documents(texts, embeddings, persist_directory=self.persist_directory,
-                                       client_settings=self.chroma_settings)
-        db.persist()
-        db = None
-        print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
+            self.collection = self.chromadb_client.get_or_create_collection(name="genius",
+                                                                            embedding_function=self.embeddings)
+            self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
 
     def load_single_document(self, file_path: str) -> List[Document]:
         ext = "." + file_path.rsplit(".", 1)[-1]
@@ -211,7 +231,7 @@ class ChatBot:
 
         raise ValueError(f"Unsupported file extension '{ext}'")
 
-    def load_documents(self, source_dir: str, ignored_files=None) -> List[Document]:
+    def load_documents(self, source_dir: str, ignored_files=None):
         """
         Loads all documents from the source documents directory, ignoring specified files
         """
@@ -223,46 +243,76 @@ class ChatBot:
                 glob.glob(os.path.join(source_dir, f"**/*{ext}"), recursive=True)
             )
         filtered_files = [file_path for file_path in all_files if file_path not in ignored_files]
+        documents = []
+        id_md5 = []
+        metadatas = []
 
-        with Pool(processes=os.cpu_count()) as pool:
-            results = []
-            with tqdm(total=len(filtered_files), desc='Loading new documents', ncols=80) as pbar:
-                for i, docs in enumerate(pool.imap_unordered(self.load_single_document, filtered_files)):
-                    results.extend(docs)
-                    pbar.update()
+        for file in filtered_files:
+            ext = "." + file.rsplit(".", 1)[-1]
+            if ext in self.loader_mapping:
+                loader_class, loader_args = self.loader_mapping[ext]
+                loader = loader_class(file, **loader_args)
+                processed_docs = loader.load()
+                md5_checksum = self.generate_md5_checksum(file=file)
+                print(f"Checking if document was already found in collection {len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids'])}")
+                if len(self.collection.query(query_texts=[file], n_results=1)['ids']) > 0:
+                    print(f"Document with same file name already exists, checking MD5 checksum for {file}...")
+                    if len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids']) > 0:
+                        print(f"Document with matching MD5 Checksum found and filename found, skipping...")
+                else:
+                    documents.append(processed_docs[0].page_content)
+                    id_md5.append(md5_checksum)
+                    metadatas.append({"source": file, "date": time.time(), "md5": md5_checksum})
+        return id_md5, documents, metadatas
 
-        return results
+    def generate_md5_checksum(self, file):
+        with open(file, 'rb') as file_to_check:
+            # read contents of the file
+            data = file_to_check.read()
+            # pipe contents of the file through
+            md5_checksum = hashlib.md5(data).hexdigest()
+        return md5_checksum
 
-    def process_documents(self, ignored_files=None) -> List[Document]:
+    def process_documents(self):
         """
-        Load documents and split in chunks
+        Get Collection
+        Compare Loaded Documents with Collection
+        Load documents.
         """
-        if ignored_files is None:
-            ignored_files = []
+        ids = []
+        documents = []
+        metadatas = []
+
         print(f"Loading documents from {self.source_directory}")
-        documents = self.load_documents(self.source_directory, ignored_files)
+        ids, documents, metadatas = self.load_documents(self.source_directory)
         if not documents:
-            print("No new documents to load")
-            return []
+            print("No new documents found")
+            return ids, documents, metadatas
         print(f"Loaded {len(documents)} new documents from {self.source_directory}")
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
-        texts = text_splitter.split_documents(documents)
-        print(f"Split into {len(texts)} chunks of text (max. {self.chunk_size} tokens each)")
-        return texts
+        # text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        # texts = text_splitter.split_documents(documents)
+        # print(f"Split into {len(texts)} chunks of text (max. {self.chunk_size} tokens each)")
+        return ids, documents, metadatas
 
     def does_vectorstore_exist(self) -> bool:
         """
         Checks if vectorstore exists
         """
-        if os.path.exists(os.path.join(self.persist_directory, 'index')):
-            if os.path.exists(os.path.join(self.persist_directory, 'chroma-collections.parquet')) \
-                    and os.path.exists(os.path.join(self.persist_directory, 'chroma-embeddings.parquet')):
-                list_index_files = glob.glob(os.path.join(self.persist_directory, 'index/*.bin'))
-                list_index_files += glob.glob(os.path.join(self.persist_directory, 'index/*.pkl'))
-                # At least 3 documents are needed in a working vectorstore
-                if len(list_index_files) > 3:
-                    return True
-        return False
+        if os.path.isfile(os.path.join(self.persist_directory, 'chroma.sqlite3')):
+            # if len(next(os.walk('dir_name'))[1]) > 1:
+            return True
+        else:
+            return False
+
+        # if os.path.exists(os.path.join(self.persist_directory, 'index')):
+        #     if os.path.exists(os.path.join(self.persist_directory, 'chroma-collections.parquet')) \
+        #             and os.path.exists(os.path.join(self.persist_directory, 'chroma-embeddings.parquet')):
+        #         list_index_files = glob.glob(os.path.join(self.persist_directory, 'index/*.bin'))
+        #         list_index_files += glob.glob(os.path.join(self.persist_directory, 'index/*.pkl'))
+        #         # At least 3 documents are needed in a working vectorstore
+        #         if len(list_index_files) > 3:
+        #             return True
+        # return False
 
 
 def usage():
@@ -305,7 +355,7 @@ def genius_chatbot(argv):
         opts, args = getopt.getopt(argv, 'a:b:c:d:e:hjm:p:q:st:x:',
                                    ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=',
                                     'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
-                                    'embeddings-model=', 'model=', 'model-engine='])
+                                    'embeddings-model=', 'model=', 'model-engine=', 'model-directory='])
     except getopt.GetoptError:
         usage()
         sys.exit(2)
@@ -325,17 +375,16 @@ def genius_chatbot(argv):
         elif opt in ('-c', '--chunks'):
             geniusbot_chat.target_source_chunks = int(arg)
         elif opt in ('-d', '--directory'):
-            if os.path.exists(arg):
-                geniusbot_chat.set_directory(directory=str(arg))
-            else:
-                print(f'Path does not exist: {arg}')
-                sys.exit(1)
+            geniusbot_chat.set_chromadb_directory(directory=str(arg))
         elif opt in ('-j', '--json'):
             geniusbot_chat.json_export_flag = True
             geniusbot_chat.hide_source_flag = True
             geniusbot_chat.mute_stream_flag = True
         elif opt in ('-e', '--embeddings-model'):
             geniusbot_chat.embeddings_model_name = arg
+            geniusbot_chat.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=geniusbot_chat.embeddings_model_name
+            )
         elif opt in ('-m', '--model'):
             geniusbot_chat.model = arg
             geniusbot_chat.model_path = os.path.normpath(os.path.join(geniusbot_chat.model_directory, geniusbot_chat.model))
@@ -346,6 +395,8 @@ def genius_chatbot(argv):
                 print("model type not supported")
                 usage()
                 sys.exit(2)
+        elif opt == '--model-directory':
+            geniusbot_chat.set_models_directory(directory=str(arg))
         elif opt in ('-p', '--prompt'):
             prompt = str(arg)
             run_flag = True
@@ -359,21 +410,19 @@ def genius_chatbot(argv):
     if assimilate_flag:
         geniusbot_chat.assimilate()
 
-    response = "Empty"
     if run_flag:
         geniusbot_chat.assimilate()
         print('RAM Utilization Before Loading Model')
         geniusbot_chat.check_hardware()
         response = geniusbot_chat.chat(prompt)
-        print('RAM Utilization After Loading Model')
+        if json_export_flag:
+            print(json.dumps(response, indent=4))
+        else:
+            print(f"Question: {response['prompt']}\n"
+                  f"Answer: {response['answer']}\n"
+                  f"Sources: {response['sources']}")
+            print('RAM Utilization After Loading Model')
         geniusbot_chat.check_hardware()
-
-    if json_export_flag:
-        print(json.dumps(response, indent=4))
-    else:
-        print(f"Question: {response['prompt']}\n"
-              f"Answer: {response['answer']}\n"
-              f"Sources: {response['sources']}")
 
 
 def main():
