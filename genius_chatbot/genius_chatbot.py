@@ -72,14 +72,13 @@ class ChatBot:
         self.script_path = os.path.normpath(os.path.dirname(__file__))
         self.persist_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                   f'/chromadb')
-        self.chromadb_client = None
         self.model_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                 f'/models')
         self.source_directory = os.path.normpath(os.path.dirname(__file__))
         self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
-        self.embeddings_model_name = "all-MiniLM-L6-v2"
+        self.embeddings_model_name = "all-MiniLM-L12-v2"
         # self.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
         #     model_name=self.embeddings_model_name
         # )
@@ -94,8 +93,8 @@ class ChatBot:
         self.bytes = 1073741824
         self.collection = None
         self.collection_name = "genius"
+        self.chromadb_client = None
         self.chroma_settings = Settings(
-            chroma_db_impl='duckdb+parquet',
             persist_directory=self.persist_directory,
             anonymized_telemetry=False
         )
@@ -123,14 +122,12 @@ class ChatBot:
             logging.info(f"Making chromadb directory: {self.persist_directory}")
             os.mkdir(self.persist_directory)
         self.chroma_settings = Settings(
-            chroma_db_impl='duckdb+parquet',
             persist_directory=self.persist_directory,
             anonymized_telemetry=False
         )
-        self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
 
     def set_models_directory(self, directory):
-        self.model_directory = f'{directory}/models'
+        self.model_directory = f'{directory}'
         if not os.path.isdir(self.model_directory):
             logging.info(f"Making models directory: {self.model_directory}")
             os.mkdir(self.model_directory)
@@ -146,14 +143,18 @@ class ChatBot:
                      f'\tFree  RAM: {round(float(self.free_memory / self.bytes), 2)} GB\n'
                      f'\tTotal RAM: {round(float(self.total_memory / self.bytes), 2)} GB\n\n')
 
-    def chat(self, prompt):
+    def chat(self, prompt: str) -> dict:
         llm = None
-        self.collection = self.chromadb_client.get_or_create_collection(name=self.collection_name,
-                                                                        embedding_function=self.embeddings)
-        retriever = self.collection.as_retriever(search_kwargs={"k": self.target_source_chunks})
+        # self.collection = self.chromadb_client.get_or_create_collection(name=self.collection_name,
+        #                                                            embedding_function=self.embeddings)
+        db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings,
+                    client_settings=self.chroma_settings, client=self.chromadb_client)
+        retriever = db.as_retriever(search_kwargs={"k": self.target_source_chunks})
+        #retriever = self.collection.as_retriever(search_kwargs={"k": self.target_source_chunks})
         # activate/deactivate the streaming StdOut callback for LLMs
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
         # Download model
+        self.set_models_directory(directory=self.model_directory)
         if os.path.isfile(os.path.join(self.model_directory, self.model)):
             print(f'Already downloaded model: {self.model_path}')
         else:
@@ -198,26 +199,50 @@ class ChatBot:
         return self.payload
 
     def assimilate(self):
-        # Create embeddings
-        #self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
+        chromadb_client = chromadb.PersistentClient(settings=self.chroma_settings , path=self.persist_directory)
         if self.does_vectorstore_exist():
-            self.collection = self.chromadb_client.get_or_create_collection(name="genius",
-                                                                            embedding_function=self.embeddings)
-            ids, documents, metadatas = self.process_documents()
-            if documents:
-                self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-                print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
-            else:
-                print("Nothing to assimilate!")
+            # Update and store locally vectorstore
+            print(f"Appending to existing vectorstore at {self.persist_directory}")
+            db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings, client_settings=self.chroma_settings, client=chromadb_client)
+            collection = db.get()
+            documents = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
+            print(f"Creating embeddings. May take some minutes...")
+            for batched_chromadb_insertion in self.batch_chromadb_insertions(chromadb_client, documents):
+                db.add_documents(batched_chromadb_insertion)
         else:
             # Create and store locally vectorstore
             print("Creating new vectorstore")
-            ids, documents, metadatas = self.process_documents()
-            print(f"Creating embeddings. May take a few minutes...")
-            self.collection = self.chromadb_client.get_or_create_collection(name="genius",
-                                                                            embedding_function=self.embeddings)
-            self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-            print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
+            documents = self.process_documents()
+            print(f"Creating embeddings. May take some minutes...")
+            # Create the db with the first batch of documents to insert
+            batched_chromadb_insertions = self.batch_chromadb_insertions(chromadb_client, documents)
+            first_insertion = next(batched_chromadb_insertions)
+            db = Chroma.from_documents(first_insertion, self.embeddings, persist_directory=self.persist_directory, client_settings=self.chroma_settings, client=chromadb_client)
+            # Add the rest of batches of documents
+            for batched_chromadb_insertion in batched_chromadb_insertions:
+                db.add_documents(batched_chromadb_insertion)
+
+
+        # Create embeddings
+        #self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
+        # if self.does_vectorstore_exist():
+        #     self.collection = self.chromadb_client.get_or_create_collection(name="genius",
+        #                                                                     embedding_function=self.embeddings)
+        #     documents = self.process_documents()
+        #     if documents:
+        #         self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        #         print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
+        #     else:
+        #         print("Nothing to assimilate!")
+        # else:
+        #     # Create and store locally vectorstore
+        #     print("Creating new vectorstore")
+        #     documents = self.process_documents()
+        #     print(f"Creating embeddings. May take a few minutes...")
+        #     self.collection = self.chromadb_client.get_or_create_collection(name="genius",
+        #                                                                     embedding_function=self.embeddings)
+        #     self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        #     print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
 
     def load_single_document(self, file_path: str) -> List[Document]:
         ext = "." + file_path.rsplit(".", 1)[-1].lower()
@@ -265,7 +290,7 @@ class ChatBot:
                     # metadatas.extend(docs[2])
                     pbar.update()
 
-
+        return documents
         # for file in filtered_files:
         #     ext = "." + file.rsplit(".", 1)[-1]
         #     if ext in self.loader_mapping:
@@ -283,7 +308,7 @@ class ChatBot:
         #             documents.append(processed_docs[0].page_content)
         #             id_md5.append(md5_checksum)
         #             metadatas.append({"source": file, "date": time.time(), "md5": md5_checksum})
-        return id_md5, documents, metadatas
+        #return id_md5, documents, metadatas
 
     def generate_md5_checksum(self, file):
         with open(file, 'rb') as file_to_check:
@@ -333,12 +358,12 @@ class ChatBot:
         #
         # return ids, documents, metadatas
 
-    def batch_chromadb_insertions(chroma_client: API, documents: List[Document]) -> List[Document]:
+    def batch_chromadb_insertions(self, chromadb_client: API, documents: List[Document]) -> List[Document]:
         """
         Split the total documents to be inserted into batches of documents that the local chroma client can process
         """
         # Get max batch size.
-        max_batch_size = chroma_client.max_batch_size
+        max_batch_size = chromadb_client.max_batch_size
         for i in range(0, len(documents), max_batch_size):
             yield documents[i:i + max_batch_size]
 
@@ -456,10 +481,13 @@ def genius_chatbot(argv):
         geniusbot_chat.assimilate()
 
     if run_flag:
-        geniusbot_chat.assimilate()
+        if not geniusbot_chat.does_vectorstore_exist():
+            geniusbot_chat.assimilate()
+        geniusbot_chat.chromadb_client = chromadb.PersistentClient(settings=geniusbot_chat.chroma_settings,
+                                                                   path=geniusbot_chat.persist_directory)
         logging.info('RAM Utilization Before Loading Model')
         geniusbot_chat.check_hardware()
-        response = geniusbot_chat.chat(prompt)
+        response = geniusbot_chat.chat(prompt=prompt)
         if json_export_flag:
             print(json.dumps(response, indent=4))
         else:
