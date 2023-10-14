@@ -12,7 +12,6 @@ import hashlib
 import chromadb
 import logging
 from chromadb.config import Settings
-from chromadb.utils import embedding_functions
 from chromadb.api.segment import API
 from typing import List
 from multiprocessing import Pool
@@ -21,7 +20,7 @@ from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.llms import GPT4All, LlamaCpp
-from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.docstore.document import Document
@@ -79,9 +78,6 @@ class ChatBot:
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
         self.embeddings_model_name = "all-MiniLM-L12-v2"
-        # self.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
-        #     model_name=self.embeddings_model_name
-        # )
         self.embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
         self.chunk_overlap = 69
         self.chunk_size = 639
@@ -145,13 +141,9 @@ class ChatBot:
 
     def chat(self, prompt: str) -> dict:
         llm = None
-        # self.collection = self.chromadb_client.get_or_create_collection(name=self.collection_name,
-        #                                                            embedding_function=self.embeddings)
         db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings,
                     client_settings=self.chroma_settings, client=self.chromadb_client)
         retriever = db.as_retriever(search_kwargs={"k": self.target_source_chunks})
-        #retriever = self.collection.as_retriever(search_kwargs={"k": self.target_source_chunks})
-        # activate/deactivate the streaming StdOut callback for LLMs
         callbacks = [] if self.mute_stream else [StreamingStdOutCallbackHandler()]
         # Download model
         self.set_models_directory(directory=self.model_directory)
@@ -169,7 +161,7 @@ class ChatBot:
                 llm = GPT4All(model=self.model_path, max_tokens=self.model_n_ctx, backend='gptj',
                               n_batch=self.model_n_batch, callbacks=callbacks, verbose=True)
             case "openai":
-                pass
+                llm = OpenAI(temperature=0.9)
             case _default:
                 # raise exception if model_type is not supported
                 raise Exception(f"Model type {self.model_engine} is not supported. "
@@ -222,28 +214,6 @@ class ChatBot:
             for batched_chromadb_insertion in batched_chromadb_insertions:
                 db.add_documents(batched_chromadb_insertion)
 
-
-        # Create embeddings
-        #self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
-        # if self.does_vectorstore_exist():
-        #     self.collection = self.chromadb_client.get_or_create_collection(name="genius",
-        #                                                                     embedding_function=self.embeddings)
-        #     documents = self.process_documents()
-        #     if documents:
-        #         self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-        #         print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
-        #     else:
-        #         print("Nothing to assimilate!")
-        # else:
-        #     # Create and store locally vectorstore
-        #     print("Creating new vectorstore")
-        #     documents = self.process_documents()
-        #     print(f"Creating embeddings. May take a few minutes...")
-        #     self.collection = self.chromadb_client.get_or_create_collection(name="genius",
-        #                                                                     embedding_function=self.embeddings)
-        #     self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-        #     print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
-
     def load_single_document(self, file_path: str) -> List[Document]:
         ext = "." + file_path.rsplit(".", 1)[-1].lower()
         if ext in self.loader_mapping:
@@ -252,16 +222,6 @@ class ChatBot:
             return loader.load()
 
         raise ValueError(f"Unsupported file extension '{ext}'")
-
-    # def load_single_document(self, file: str) -> [List[Document], str, dict]:
-    #     ext = "." + file.rsplit(".", 1)[-1].lower()
-    #     if ext in self.loader_mapping:
-    #         loader_class, loader_args = self.loader_mapping[ext]
-    #         loader = loader_class(file, **loader_args)
-    #         processed_docs = loader.load()
-    #         md5_checksum = self.generate_md5_checksum(file=file)
-    #         return processed_docs, md5_checksum, {"source": file, "date": time.time(), "md5": md5_checksum}
-    #     raise ValueError(f"Unsupported file extension '{ext}'")
 
     def load_documents(self, source_dir: str, ignored_files: List[str] = []):
         """
@@ -291,24 +251,6 @@ class ChatBot:
                     pbar.update()
 
         return documents
-        # for file in filtered_files:
-        #     ext = "." + file.rsplit(".", 1)[-1]
-        #     if ext in self.loader_mapping:
-        #         loader_class, loader_args = self.loader_mapping[ext]
-        #         loader = loader_class(file, **loader_args)
-        #         processed_docs = loader.load()
-        #         md5_checksum = self.generate_md5_checksum(file=file)
-        #         print(
-        #             f"Checking if document was already found in collection {len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids'])}")
-        #         if len(self.collection.query(query_texts=[file], n_results=1)['ids']) > 0:
-        #             print(f"Document with same file name already exists, checking MD5 checksum for {file}...")
-        #             if len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids']) > 0:
-        #                 print(f"Document with matching MD5 Checksum found and filename found, skipping...")
-        #         else:
-        #             documents.append(processed_docs[0].page_content)
-        #             id_md5.append(md5_checksum)
-        #             metadatas.append({"source": file, "date": time.time(), "md5": md5_checksum})
-        #return id_md5, documents, metadatas
 
     def generate_md5_checksum(self, file):
         with open(file, 'rb') as file_to_check:
@@ -334,29 +276,6 @@ class ChatBot:
         documents = text_splitter.split_documents(documents)
         print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
         return documents
-        # print(f"Loading documents from {source_directory}")
-        # documents = load_documents(source_directory, ignored_files)
-        # if not documents:
-        #     print("No new documents to load")
-        #     return []
-        # print(f"Loaded {len(documents)} new documents from {source_directory}")
-        # text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        # documents = text_splitter.split_documents(documents)
-        # print(f"Split into {len(documents)} chunks of text (max. {chunk_size} tokens each)")
-        # return documents
-
-        # print(f"Loading documents from {self.source_directory}")
-        # ids, documents, metadatas = self.load_documents(self.source_directory)
-        # if not documents:
-        #     print("No new documents found")
-        #     return ids, documents, metadatas
-        # print(f"Loaded {len(documents)} new documents from {self.source_directory}")
-        #
-        # text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
-        # documents = text_splitter.split_documents(documents)
-        # print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
-        #
-        # return ids, documents, metadatas
 
     def batch_chromadb_insertions(self, chromadb_client: API, documents: List[Document]) -> List[Document]:
         """
@@ -371,10 +290,6 @@ class ChatBot:
         """
         Checks if vectorstore exists
         """
-        # if os.path.isfile(os.path.join(self.persist_directory, 'chroma.sqlite3')):
-        #     return True
-        # else:
-        #     return False
         db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
         if not db.get()['documents']:
             return False
@@ -421,7 +336,8 @@ def genius_chatbot(argv):
         opts, args = getopt.getopt(argv, 'a:b:c:d:e:hjm:p:q:st:x:',
                                    ['help', 'assimilate=', 'batch-token=', 'chunks=', 'directory=',
                                     'hide-source', 'mute-stream', 'json', 'prompt=', 'max-token-limit=',
-                                    'embeddings-model=', 'model=', 'model-engine=', 'model-directory='])
+                                    'embeddings-model=', 'model=', 'model-engine=', 'model-directory=', 'openai-token=',
+                                    'openai-api='])
     except getopt.GetoptError as e:
         usage()
         logging.error("Error: {e}\nExiting...")
@@ -459,6 +375,10 @@ def genius_chatbot(argv):
             geniusbot_chat.model_path = os.path.normpath(
                 os.path.join(geniusbot_chat.model_directory, geniusbot_chat.model))
             print(f"Model: {geniusbot_chat.model}")
+        elif opt == '--openai-token':
+            os.environ["OPENAI_API_KEY"] = arg
+        elif opt == '--openai-api':
+            os.environ["OPENAI_API_BASE"] = arg
         elif opt in ('-x', '--model-engine'):
             geniusbot_chat.model_engine = arg
             if geniusbot_chat.model_engine.lower() != "llamacpp" and geniusbot_chat.model_engine.lower() != "gpt4all":
