@@ -96,7 +96,7 @@ class ChatBot:
         self.collection_name = "genius"
         self.vectorstore = "chromadb"
         self.chromadb_client = None
-        self.pgvector_username = ""
+        self.pgvector_user = ""
         self.pgvector_password = ""
         self.pgvector_host = "localhost"
         self.pgvector_port = "5432"
@@ -123,7 +123,7 @@ class ChatBot:
             # Add more mappings for other file extensions and loaders as needed
         }
         self.payload = None
-        self.assimilate()
+        #self.assimilate()
 
     def set_chromadb_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
@@ -165,7 +165,7 @@ class ChatBot:
                     host=self.pgvector_host,
                     port=int(self.pgvector_port),
                     database=self.pgvector_database,
-                    user=self.pgvector_username,
+                    user=self.pgvector_user,
                     password=self.pgvector_password,
                 ),
                 embedding_function=self.embeddings,
@@ -253,7 +253,7 @@ class ChatBot:
                         host=self.pgvector_host,
                         port=int(self.pgvector_port),
                         database=self.pgvector_database,
-                        user=self.pgvector_username,
+                        user=self.pgvector_user,
                         password=self.pgvector_password,
                     ),
                     embedding_function=self.embeddings,
@@ -270,7 +270,7 @@ class ChatBot:
                         host=self.pgvector_host,
                         port=int(self.pgvector_port),
                         database=self.pgvector_database,
-                        user=self.pgvector_username,
+                        user=self.pgvector_user,
                         password=self.pgvector_password,
                     ),
                 )
@@ -357,12 +357,12 @@ class ChatBot:
                     host=self.pgvector_host,
                     port=int(self.pgvector_port),
                     database=self.pgvector_database,
-                    user=self.pgvector_username,
+                    user=self.pgvector_user,
                     password=self.pgvector_password,
                 ),
                 embedding_function=self.embeddings,
             )
-            if not db.get()['documents']:
+            if not db:
                 return False
             return True
 
@@ -370,31 +370,37 @@ class ChatBot:
 
 def usage():
     print(f'Usage:\n'
-          f'-h | --help             [ See usage for script ]\n'
-          f'-a | --assimilate       [ Assimilate knowledge from media provided in directory ]\n'
-          f'-b | --batch-token      [ Number of tokens per batch ]\n'
-          f'-c | --chunks           [ Number of chunks to use ]\n'
-          f'-d | --directory        [ Directory for chromadb and model storage ]\n'
-          f'-e | --embeddings-model [ Embeddings model to use https://www.sbert.net/docs/pretrained_models.html ]\n'
-          f'-j | --json             [ Export to JSON ]\n'
-          f'-p | --prompt           [ Prompt for chatbot ]\n'
-          f'-q | --mute-stream      [ Mute stream of generation ]\n'
-          f'-m | --model            [ Model to use from GPT4All https://gpt4all.io/index.html ]\n'
-          f'-s | --hide-source      [ Hide source of answer ]\n'
-          f'-t | --max-token-limit  [ Maximum token to generate ]\n'
-          f'-x | --model-engine     [ GPT4All, LlamaCPP, or OpenAI ]\n'
+          f'-h | --help               [ See usage for script ]\n'
+          f'-a | --assimilate         [ Assimilate knowledge from media provided in directory ]\n'
+          f'   | --batch-token        [ Number of tokens per batch ]\n'
+          f'   | --chromadb-directory [ Directory for chromadb persistent storage ]\n'
+          f'   | --chunks             [ Number of chunks to use ]\n'
+          f'-e | --embeddings-model   [ Embeddings model to use https://www.sbert.net/docs/pretrained_models.html ]\n'
+          f'   | --hide-source        [ Hide source of answer ]\n'
+          f'-j | --json               [ Export to JSON ]\n'
+          f'   | --openai-token       [ OpenAI token ]\n'
+          f'   | --openai-api         [ OpenAI API Url ]\n'
+          f'   | --pgvector-user  [ PGVector user ]\n'
+          f'   | --pgvector-password  [ PGVector password ]\n'
+          f'   | --pgvector-host      [ PGVector host ]\n'
+          f'   | --pgvector-port      [ PGVector port ]\n'
+          f'   | --pgvector-database  [ PGVector database ]\n'
+          f'   | --pgvector-driver    [ PGVector driver ]\n'
+          f'-p | --prompt             [ Prompt for chatbot ]\n'
+          f'   | --mute-stream        [ Mute stream of generation ]\n'
+          f'-m | --model              [ Model to use from GPT4All https://gpt4all.io/index.html ]\n'          
+          f'   | --max-token-limit    [ Maximum token to generate ]\n'
+          f'   | --model-directory    [ Directory to store models ]\n'
+          f'   | --model-engine       [ GPT4All, LlamaCPP, or OpenAI ]\n'
           f'\nExample:\n'
-          f'genius-chatbot\n'
-          f'\t--assimilate "/directory/of/documents"\n'
+          f'genius-chatbot --assimilate "/directory/of/documents"\n'
           f'\n'
-          f'genius-chatbot\n'
-          f'\t--prompt "What is the 10th digit of Pi?"\n'
+          f'genius-chatbot --prompt "What is the 10th digit of Pi?"\n'
           f'\n'
-          f'genius-chatbot\n'
-          f'\t--model "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"\n'
-          f'\t--prompt "Chatbots are cool because they"\n'
-          f'\t--model-engine "GPT4All"\n'
-          f'\t--assimilate "/directory/of/documents"\n'
+          f'genius-chatbot --prompt "Chatbots are cool because they" \\\n'
+          f'\t--model "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin" \\\n'
+          f'\t--model-engine "GPT4All" \\\n'
+          f'\t--assimilate "/directory/of/documents" \\\n'
           f'\t--json\n')
 
 
@@ -405,14 +411,14 @@ def genius_chatbot(argv):
     json_export_flag = False
     prompt = 'Geniusbot is the smartest chatbot in existence.'
     try:
-        opts, args = getopt.getopt(argv, 'a:b:c:d:e:hjm:p:q:st:x:',
+        opts, args = getopt.getopt(argv, 'a:he:jm:p:',
                                    ['help', 'assimilate=', 'prompt=', 'json',
                                     'batch-token=', 'chunks=', 'max-token-limit=',
                                     'hide-source', 'mute-stream',
                                     'embeddings-model=', 'model=', 'model-engine=',
-                                    'model-directory=', 'persistent-directory=',
+                                    'model-directory=', 'chromadb-directory=',
                                     'openai-token=', 'openai-api=',
-                                    'pgvector-username=','pgvector-password=','pgvector-host=','pgvector-port=',
+                                    'pgvector-user=','pgvector-password=','pgvector-host=','pgvector-port=',
                                     'pgvector-driver=','pgvector-database='])
     except getopt.GetoptError as e:
         usage()
@@ -421,7 +427,6 @@ def genius_chatbot(argv):
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage()
-            logging.error("Exiting...")
             sys.exit()
         elif opt in ('-a', '--assimilate'):
             if os.path.exists(arg):
@@ -430,12 +435,13 @@ def genius_chatbot(argv):
             else:
                 logging.error(f'Path does not exist: {arg}')
                 sys.exit(1)
-        elif opt in ('-b', '--batch-token'):
+        elif opt == '--batch-token':
             geniusbot_chat.model_n_batch = int(arg)
-        elif opt in ('-c', '--chunks'):
+        elif opt == '--chunks':
             geniusbot_chat.target_source_chunks = int(arg)
-        elif opt in ('-d', '--persistent-directory'):
+        elif opt == '--chromadb-directory':
             geniusbot_chat.set_chromadb_directory(directory=str(arg))
+            geniusbot_chat.vectorstore = "chromadb"
         elif opt in ('-j', '--json'):
             geniusbot_chat.json_export_flag = True
             geniusbot_chat.hide_source_flag = True
@@ -454,7 +460,7 @@ def genius_chatbot(argv):
         elif opt == '--openai-api':
             os.environ["OPENAI_API_BASE"] = arg
             geniusbot_chat.openai_api_base = arg
-        elif opt in ('-x', '--model-engine'):
+        elif opt == '--model-engine':
             geniusbot_chat.model_engine = arg
             if (geniusbot_chat.model_engine.lower() != "llamacpp"
                     and geniusbot_chat.model_engine.lower() != "gpt4all"
@@ -467,23 +473,24 @@ def genius_chatbot(argv):
         elif opt in ('-p', '--prompt'):
             prompt = str(arg)
             run_flag = True
-        elif opt in ('-s', '--hide-source'):
+        elif opt == '--hide-source':
             geniusbot_chat.hide_source_flag = True
-        elif opt == '--pgvector-username':
-            geniusbot_chat.pgvector_username = arg
+        elif opt == '--pgvector-user':
+            geniusbot_chat.pgvector_user = arg
         elif opt == '--pgvector-password':
             geniusbot_chat.pgvector_password = arg
         elif opt == '--pgvector-host':
             geniusbot_chat.pgvector_host = arg
+            geniusbot_chat.vectorstore = "pgvector"
         elif opt == '--pgvector-port':
             geniusbot_chat.pgvector_port = arg
         elif opt == '--pgvector-driver':
             geniusbot_chat.pgvector_driver = arg
         elif opt == '--pgvector-database':
             geniusbot_chat.pgvector_database = arg
-        elif opt in ('-t', '--max-token-limit'):
+        elif opt == '--max-token-limit':
             geniusbot_chat.model_n_ctx = int(arg)
-        elif opt in ('-q', '--mute-stream'):
+        elif opt == '--mute-stream':
             geniusbot_chat.mute_stream_flag = True
 
     if assimilate_flag:
