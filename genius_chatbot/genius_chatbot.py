@@ -13,20 +13,24 @@ import chromadb
 import logging
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
+from chromadb.api.segment import API
 from typing import List
+from multiprocessing import Pool
+from tqdm import tqdm
 from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.llms import GPT4All, LlamaCpp
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
-
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.docstore.document import Document
 from langchain.document_loaders import (
     CSVLoader,
     EverNoteLoader,
     PyMuPDFLoader,
     TextLoader,
+    Docx2txtLoader,
     UnstructuredEmailLoader,
     UnstructuredEPubLoader,
     UnstructuredHTMLLoader,
@@ -68,7 +72,7 @@ class ChatBot:
         self.script_path = os.path.normpath(os.path.dirname(__file__))
         self.persist_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                   f'/chromadb')
-        self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
+        #self.chromadb_client = chromadb.PersistentClient(path=self.persist_directory)
         self.model_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                 f'/models')
         self.source_directory = os.path.normpath(os.path.dirname(__file__))
@@ -76,9 +80,10 @@ class ChatBot:
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
         self.embeddings_model_name = "all-MiniLM-L6-v2"
-        self.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=self.embeddings_model_name
-        )
+        # self.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
+        #     model_name=self.embeddings_model_name
+        # )
+        self.embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
         self.chunk_overlap = 69
         self.chunk_size = 639
         self.target_source_chunks = 6
@@ -96,8 +101,8 @@ class ChatBot:
         )
         self.loader_mapping = {
             ".csv": (CSVLoader, {}),
+            ".docx": (Docx2txtLoader, {}),
             ".doc": (UnstructuredWordDocumentLoader, {}),
-            ".docx": (UnstructuredWordDocumentLoader, {}),
             ".enex": (EverNoteLoader, {}),
             ".eml": (MyEmlLoader, {}),
             ".epub": (UnstructuredEPubLoader, {}),
@@ -213,48 +218,59 @@ class ChatBot:
             self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
             print(f"Ingestion complete! You can now run genius-chatbot to query your documents")
 
-    def load_single_document(self, file_path: str) -> List[Document]:
-        ext = "." + file_path.rsplit(".", 1)[-1]
+    def load_single_document(self, file: str) -> [List[Document], str, dict]:
+        ext = "." + file.rsplit(".", 1)[-1].lower()
         if ext in self.loader_mapping:
             loader_class, loader_args = self.loader_mapping[ext]
-            loader = loader_class(file_path, **loader_args)
-            return loader.load()
-
+            loader = loader_class(file, **loader_args)
+            processed_docs = loader.load()
+            md5_checksum = self.generate_md5_checksum(file=file)
+            return processed_docs, md5_checksum, {"source": file, "date": time.time(), "md5": md5_checksum}
         raise ValueError(f"Unsupported file extension '{ext}'")
 
-    def load_documents(self, source_dir: str, ignored_files=None):
+    def load_documents(self, source_dir: str, ignored_files: List[str] = []):
         """
         Loads all documents from the source documents directory, ignoring specified files
         """
-        if ignored_files is None:
-            ignored_files = []
         all_files = []
         for ext in self.loader_mapping:
             all_files.extend(
-                glob.glob(os.path.join(source_dir, f"**/*{ext}"), recursive=True)
+                glob.glob(os.path.join(source_dir, f"**/*{ext.lower()}"), recursive=True)
+            )
+            all_files.extend(
+                glob.glob(os.path.join(source_dir, f"**/*{ext.upper()}"), recursive=True)
             )
         filtered_files = [file_path for file_path in all_files if file_path not in ignored_files]
         documents = []
         id_md5 = []
         metadatas = []
 
-        for file in filtered_files:
-            ext = "." + file.rsplit(".", 1)[-1]
-            if ext in self.loader_mapping:
-                loader_class, loader_args = self.loader_mapping[ext]
-                loader = loader_class(file, **loader_args)
-                processed_docs = loader.load()
-                md5_checksum = self.generate_md5_checksum(file=file)
-                print(
-                    f"Checking if document was already found in collection {len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids'])}")
-                if len(self.collection.query(query_texts=[file], n_results=1)['ids']) > 0:
-                    print(f"Document with same file name already exists, checking MD5 checksum for {file}...")
-                    if len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids']) > 0:
-                        print(f"Document with matching MD5 Checksum found and filename found, skipping...")
-                else:
-                    documents.append(processed_docs[0].page_content)
-                    id_md5.append(md5_checksum)
-                    metadatas.append({"source": file, "date": time.time(), "md5": md5_checksum})
+        with Pool(processes=os.cpu_count()) as pool:
+            with tqdm(total=len(filtered_files), desc='Loading new documents', ncols=80) as pbar:
+                for i, docs in enumerate(pool.imap_unordered(self.load_single_document, filtered_files)):
+                    documents.extend(docs[0])
+                    id_md5.extend(docs[1])
+                    metadatas.extend(docs[2])
+                    pbar.update()
+
+
+        # for file in filtered_files:
+        #     ext = "." + file.rsplit(".", 1)[-1]
+        #     if ext in self.loader_mapping:
+        #         loader_class, loader_args = self.loader_mapping[ext]
+        #         loader = loader_class(file, **loader_args)
+        #         processed_docs = loader.load()
+        #         md5_checksum = self.generate_md5_checksum(file=file)
+        #         print(
+        #             f"Checking if document was already found in collection {len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids'])}")
+        #         if len(self.collection.query(query_texts=[file], n_results=1)['ids']) > 0:
+        #             print(f"Document with same file name already exists, checking MD5 checksum for {file}...")
+        #             if len(self.collection.query(query_texts=[md5_checksum], n_results=1)['ids']) > 0:
+        #                 print(f"Document with matching MD5 Checksum found and filename found, skipping...")
+        #         else:
+        #             documents.append(processed_docs[0].page_content)
+        #             id_md5.append(md5_checksum)
+        #             metadatas.append({"source": file, "date": time.time(), "md5": md5_checksum})
         return id_md5, documents, metadatas
 
     def generate_md5_checksum(self, file):
@@ -271,9 +287,16 @@ class ChatBot:
         Compare Loaded Documents with Collection
         Load documents.
         """
-        ids = []
-        documents = []
-        metadatas = []
+        # print(f"Loading documents from {source_directory}")
+        # documents = load_documents(source_directory, ignored_files)
+        # if not documents:
+        #     print("No new documents to load")
+        #     exit(0)
+        # print(f"Loaded {len(documents)} new documents from {source_directory}")
+        # text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        # documents = text_splitter.split_documents(documents)
+        # print(f"Split into {len(documents)} chunks of text (max. {chunk_size} tokens each)")
+        # return documents
 
         print(f"Loading documents from {self.source_directory}")
         ids, documents, metadatas = self.load_documents(self.source_directory)
@@ -281,16 +304,34 @@ class ChatBot:
             print("No new documents found")
             return ids, documents, metadatas
         print(f"Loaded {len(documents)} new documents from {self.source_directory}")
+
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        documents = text_splitter.split_documents(documents)
+        print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
+
         return ids, documents, metadatas
+
+    def batch_chromadb_insertions(chroma_client: API, documents: List[Document]) -> List[Document]:
+        """
+        Split the total documents to be inserted into batches of documents that the local chroma client can process
+        """
+        # Get max batch size.
+        max_batch_size = chroma_client.max_batch_size
+        for i in range(0, len(documents), max_batch_size):
+            yield documents[i:i + max_batch_size]
 
     def does_vectorstore_exist(self) -> bool:
         """
         Checks if vectorstore exists
         """
-        if os.path.isfile(os.path.join(self.persist_directory, 'chroma.sqlite3')):
-            return True
-        else:
+        # if os.path.isfile(os.path.join(self.persist_directory, 'chroma.sqlite3')):
+        #     return True
+        # else:
+        #     return False
+        db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
+        if not db.get()['documents']:
             return False
+        return True
 
 
 def usage():
@@ -362,9 +403,10 @@ def genius_chatbot(argv):
             geniusbot_chat.mute_stream_flag = True
         elif opt in ('-e', '--embeddings-model'):
             geniusbot_chat.embeddings_model_name = arg
-            geniusbot_chat.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=geniusbot_chat.embeddings_model_name
-            )
+            # geniusbot_chat.embeddings = embedding_functions.SentenceTransformerEmbeddingFunction(
+            #     model_name=geniusbot_chat.embeddings_model_name
+            # )
+            geniusbot_chat.embeddings = HuggingFaceEmbeddings(model_name=geniusbot_chat.embeddings_model_name)
         elif opt in ('-m', '--model'):
             geniusbot_chat.model = arg
             geniusbot_chat.model_path = os.path.normpath(
