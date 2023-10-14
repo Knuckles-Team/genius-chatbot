@@ -74,10 +74,10 @@ class ChatBot:
         self.model_directory = (f'{os.path.normpath(os.path.dirname(self.script_path.rstrip("/")))}'
                                 f'/models')
         self.source_directory = os.path.normpath(os.path.dirname(__file__))
-        self.model = "wizardlm-13b-v1.1-superhot-8k.ggmlv3.q4_0.bin"
+        self.model = "nous-hermes-13b.ggmlv3.q4_0.bin"
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
-        self.embeddings_model_name = "all-MiniLM-L12-v2"
+        self.embeddings_model_name = "all-mpnet-base-v2"
         self.embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
         self.chunk_overlap = 69
         self.chunk_size = 639
@@ -151,7 +151,7 @@ class ChatBot:
             print(f'Already downloaded model: {self.model_path}')
         else:
             print(f'Model was not found, downloading...')
-            gpt4all.GPT4All.download_model(self.model, self.model_directory)
+            gpt4all.GPT4All.retrieve_model(self.model, self.model_directory, allow_download=True)
         # Prepare the LLM
         match self.model_engine.lower():
             case "llamaccp":
@@ -236,18 +236,11 @@ class ChatBot:
                 glob.glob(os.path.join(source_dir, f"**/*{ext.upper()}"), recursive=True)
             )
         filtered_files = [file_path for file_path in all_files if file_path not in ignored_files]
-
-        # id_md5 = []
-        # metadatas = []
-
         with Pool(processes=os.cpu_count()) as pool:
             documents = []
             with tqdm(total=len(filtered_files), desc='Loading new documents', ncols=80) as pbar:
                 for i, docs in enumerate(pool.imap_unordered(self.load_single_document, filtered_files)):
                     documents.extend(docs)
-                    # documents.extend(docs[0])
-                    # id_md5.extend(docs[1])
-                    # metadatas.extend(docs[2])
                     pbar.update()
 
         return documents
