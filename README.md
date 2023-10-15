@@ -28,6 +28,13 @@ Local vector store supported with ChromaDB, or connect to a PGVector database
 
 Allows for scalable intelligence tailored for hardware limitations
 
+This repository is actively maintained - Contributions are welcome!
+
+Contribution Opportunities:
+- Support more vector databases
+- Get list of models to choose from
+- Output everything as JSON when selected
+
 <details>
   <summary><b>Usage:</b></summary>
 
