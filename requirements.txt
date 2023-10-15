@@ -16,6 +16,6 @@ appengine-python-standard==1.1.4
 EbookLib==0.18
 pgvector==0.2.3
 openai==0.28.1
-psycopg2-binary==2.9.9
+psycopg-binary==3.1.12
 tiktoken==0.5.1
 unstructured[all-docs]==0.10.22
