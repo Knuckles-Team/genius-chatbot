@@ -15,12 +15,12 @@
 
 ![GitHub top language](https://img.shields.io/github/languages/top/Knuckles-Team/genius-chatbot)
 ![GitHub language count](https://img.shields.io/github/languages/count/Knuckles-Team/genius-chatbot)
-![PyPI - Wheel](https://img.shields.io/pypi/wheel/genius-chatbot)
-![PyPI - Implementation](https://img.shields.io/pypi/implementation/genius-chatbot)
 ![GitHub repo size](https://img.shields.io/github/repo-size/Knuckles-Team/genius-chatbot)
 ![GitHub repo file count (file type)](https://img.shields.io/github/directory-file-count/Knuckles-Team/genius-chatbot)
+![PyPI - Wheel](https://img.shields.io/pypi/wheel/genius-chatbot)
+![PyPI - Implementation](https://img.shields.io/pypi/implementation/genius-chatbot)
 
-*Version: 1.1.0*
+*Version: 1.2.0*
 
 Chatbot that uses any desired hugging face model or allows for scalable 
 intelligence based on hardware limitations
