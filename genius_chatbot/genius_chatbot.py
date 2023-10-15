@@ -366,7 +366,7 @@ def usage():
           f'-j | --json               [ Export to JSON ]\n'
           f'   | --openai-token       [ OpenAI token ]\n'
           f'   | --openai-api         [ OpenAI API Url ]\n'
-          f'   | --pgvector-user  [ PGVector user ]\n'
+          f'   | --pgvector-user      [ PGVector user ]\n'
           f'   | --pgvector-password  [ PGVector password ]\n'
           f'   | --pgvector-host      [ PGVector host ]\n'
           f'   | --pgvector-port      [ PGVector port ]\n'

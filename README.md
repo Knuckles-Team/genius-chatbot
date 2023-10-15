@@ -1,4 +1,25 @@
 # Genius Chatbot
+
+![PyPI - Version](https://img.shields.io/pypi/v/genius-chatbot)
+![PyPI - Downloads](https://img.shields.io/pypi/dd/genius-chatbot)
+![GitHub Repo stars](https://img.shields.io/github/stars/Knuckles-Team/genius-chatbot)
+![GitHub forks](https://img.shields.io/github/forks/Knuckles-Team/genius-chatbot)
+![GitHub contributors](https://img.shields.io/github/contributors/Knuckles-Team/genius-chatbot)
+![PyPI - License](https://img.shields.io/pypi/l/genius-chatbot)
+![GitHub](https://img.shields.io/github/license/Knuckles-Team/genius-chatbot)
+
+![GitHub last commit (by committer)](https://img.shields.io/github/last-commit/Knuckles-Team/genius-chatbot)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/Knuckles-Team/genius-chatbot)
+![GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed/Knuckles-Team/genius-chatbot)
+![GitHub issues](https://img.shields.io/github/issues/Knuckles-Team/genius-chatbot)
+
+![GitHub top language](https://img.shields.io/github/languages/top/Knuckles-Team/genius-chatbot)
+![GitHub language count](https://img.shields.io/github/languages/count/Knuckles-Team/genius-chatbot)
+![PyPI - Wheel](https://img.shields.io/pypi/wheel/genius-chatbot)
+![PyPI - Implementation](https://img.shields.io/pypi/implementation/genius-chatbot)
+![GitHub repo size](https://img.shields.io/github/repo-size/Knuckles-Team/genius-chatbot)
+![GitHub repo file count (file type)](https://img.shields.io/github/directory-file-count/Knuckles-Team/genius-chatbot)
+
 *Version: 1.1.0*
 
 Chatbot that uses any desired hugging face model or allows for scalable 
@@ -70,15 +91,9 @@ apt install -y pandoc
 python -m pip install genius-chatbot
 ```
 
-#### Build Instructions
-Build Python Package
+### Repository Owners:
 
-```bash
-sudo chmod +x ./*.py
-sudo pip install .
-python3 setup.py bdist_wheel --universal
-# Test Pypi
-twine upload --repository-url https://test.pypi.org/legacy/ dist/* --verbose -u "Username" -p "Password"
-# Prod Pypi
-twine upload dist/* --verbose -u "Username" -p "Password"
-```
+<img width="100%" height="180em" src="https://github-readme-stats.vercel.app/api?username=Knucklessg1&show_icons=true&hide_border=true&&count_private=true&include_all_commits=true" />
+
+![GitHub followers](https://img.shields.io/github/followers/Knucklessg1)
+![GitHub User's stars](https://img.shields.io/github/stars/Knucklessg1)
