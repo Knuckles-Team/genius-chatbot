@@ -488,8 +488,9 @@ def genius_chatbot(argv):
     if run_flag:
         if not geniusbot_chat.does_vectorstore_exist():
             geniusbot_chat.assimilate()
-        geniusbot_chat.chromadb_client = chromadb.PersistentClient(settings=geniusbot_chat.chroma_settings,
-                                                                   path=geniusbot_chat.persist_directory)
+        if geniusbot_chat.vectorstore == "chromadb":
+            geniusbot_chat.chromadb_client = chromadb.PersistentClient(settings=geniusbot_chat.chroma_settings,
+                                                                       path=geniusbot_chat.persist_directory)
         logging.info('RAM Utilization Before Loading Model')
         geniusbot_chat.check_hardware()
         response = geniusbot_chat.chat(prompt=prompt)
