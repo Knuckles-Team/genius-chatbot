@@ -87,7 +87,7 @@ class ChatBot:
         self.chunk_overlap = 69
         self.chunk_size = 639
         self.target_source_chunks = 6
-        self.mute_stream = False
+        self.mute_stream = True
         self.hide_source = False
         self.model_n_ctx = 2127
         self.model_n_batch = 9
@@ -285,9 +285,6 @@ class ChatBot:
         raise ValueError(f"Unsupported file extension '{ext}'")
 
     def load_documents(self, source_dir: str, ignored_files: List[str] = []):
-        """
-        Loads all documents from the source documents directory, ignoring specified files
-        """
         all_files = []
         for ext in self.loader_mapping:
             all_files.extend(
@@ -315,11 +312,6 @@ class ChatBot:
         return md5_checksum
 
     def process_documents(self, ignored_files: List[str] = []) -> List[Document]:
-        """
-        Get Collection
-        Compare Loaded Documents with Collection
-        Load documents.
-        """
         print(f"Loading documents from {self.source_directory}")
         documents = self.load_documents(self.source_directory, ignored_files)
         if not documents:
@@ -332,18 +324,12 @@ class ChatBot:
         return documents
 
     def batch_chromadb_insertions(self, chromadb_client: API, documents: List[Document]) -> List[Document]:
-        """
-        Split the total documents to be inserted into batches of documents that the local chroma client can process
-        """
         # Get max batch size.
         max_batch_size = chromadb_client.max_batch_size
         for i in range(0, len(documents), max_batch_size):
             yield documents[i:i + max_batch_size]
 
     def does_vectorstore_exist(self) -> bool:
-        """
-        Checks if vectorstore exists
-        """
         if self.vectorstore == "chromadb":
             db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
             if not db.get()['documents']:
