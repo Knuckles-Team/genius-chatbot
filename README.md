@@ -22,10 +22,14 @@
 
 *Version: 1.3.0*
 
-Chatbot that uses any desired hugging face model or allows for scalable 
-intelligence based on hardware limitations
+Chatbot that uses any hugging face model or OpenAI endpoint. 
 
-### Usage:
+Local vector store supported with ChromaDB, or connect to a PGVector database
+
+Allows for scalable intelligence tailored for hardware limitations
+
+<details>
+  <summary><b>Usage:</b></summary>
 
 | Short Flag | Long Flag            | Description                                                                     |
 |------------|----------------------|---------------------------------------------------------------------------------|
@@ -52,8 +56,10 @@ intelligence based on hardware limitations
 |            | --model-directory    | Directory to store models locally                                               |
 |            | --model-engine       | GPT4All LlamaCPP, or OpenAI                                                     |
 
-### Example:
-Your very first time running should assimilate up to 3 documents to establish the Chroma Database. This will unlock prompting
+</details>
+
+<details>
+  <summary><b>Example:</b></summary>
 
 ```bash
 genius-chatbot --assimilate "/directory/of/documents"
@@ -71,7 +77,11 @@ genius-chatbot --prompt "Chatbots are cool because they" \
     --json
 ```
 
-#### Install Instructions
+</details>
+
+<details>
+  <summary><b>Installation Instructions:</b></summary>
+
 Install Python Package
 
 Windows Prerequisites:
@@ -91,9 +101,14 @@ apt install -y pandoc
 python -m pip install genius-chatbot
 ```
 
-### Repository Owners:
+</details>
+
+<details>
+  <summary><b>Repository Owners:</b></summary>
+
 
 <img width="100%" height="180em" src="https://github-readme-stats.vercel.app/api?username=Knucklessg1&show_icons=true&hide_border=true&&count_private=true&include_all_commits=true" />
 
 ![GitHub followers](https://img.shields.io/github/followers/Knucklessg1)
 ![GitHub User's stars](https://img.shields.io/github/stars/Knucklessg1)
+</details>
