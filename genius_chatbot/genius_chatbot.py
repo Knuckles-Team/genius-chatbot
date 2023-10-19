@@ -16,6 +16,7 @@ from chromadb.api.segment import API
 from typing import List
 from multiprocessing import Pool
 from tqdm import tqdm
+from agent_protocol import Agent, Step, Task
 from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -123,7 +124,6 @@ class ChatBot:
             # Add more mappings for other file extensions and loaders as needed
         }
         self.payload = None
-        #self.assimilate()
 
     def set_chromadb_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
@@ -390,6 +390,21 @@ def usage():
           f'\t--json\n')
 
 
+async def task_handler(task: Task) -> None:
+    # TODO: Create initial step(s) for the task
+    await Agent.db.create_step(task.task_id, ...)
+
+
+async def step_handler(step: Step) -> Step:
+    # TODO: handle next step
+    if step.name == "print":
+        print(step.input)
+        step.is_last = True
+
+    step.output = "Output from the agent"
+    return step
+
+
 def genius_chatbot(argv):
     geniusbot_chat = ChatBot()
     run_flag = False
@@ -502,6 +517,8 @@ def genius_chatbot(argv):
                   f"Sources: {response['sources']}\n\n")
             logging.info('RAM Utilization After Loading Model')
         geniusbot_chat.check_hardware()
+
+    Agent.setup_agent(task_handler, step_handler).start()
 
 
 def main():
