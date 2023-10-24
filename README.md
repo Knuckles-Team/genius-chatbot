@@ -20,7 +20,7 @@
 ![PyPI - Wheel](https://img.shields.io/pypi/wheel/genius-chatbot)
 ![PyPI - Implementation](https://img.shields.io/pypi/implementation/genius-chatbot)
 
-*Version: 1.6.0*
+*Version: 1.7.0*
 
 Chatbot that uses any hugging face model or OpenAI endpoint. 
 
