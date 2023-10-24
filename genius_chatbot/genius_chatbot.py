@@ -227,14 +227,14 @@ class ChatBot:
                             client_settings=self.chroma_settings, client=chromadb_client)
                 collection = db.get()
                 documents = self.process_documents([metadata['source'] for metadata in collection['metadatas']])
-                print(f"Creating embeddings. May take some minutes...")
+                print(f"Creating embeddings. This may take a few minutes...")
                 for batched_chromadb_insertion in self.batch_chromadb_insertions(chromadb_client, documents):
                     db.add_documents(batched_chromadb_insertion)
             else:
                 # Create and store locally vectorstore
                 print("Creating new vectorstore")
                 documents = self.process_documents()
-                print(f"Creating embeddings. May take some minutes...")
+                print(f"Creating embeddings. This may take a few minutes...")
                 # Create the db with the first batch of documents to insert
                 batched_chromadb_insertions = self.batch_chromadb_insertions(chromadb_client, documents)
                 first_insertion = next(batched_chromadb_insertions)
