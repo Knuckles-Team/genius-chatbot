@@ -43,6 +43,7 @@ setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
     entry_points={'console_scripts': ['genius-chatbot = genius_chatbot.genius_chatbot:main']},
 )
