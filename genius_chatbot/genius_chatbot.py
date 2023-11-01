@@ -11,6 +11,7 @@ import glob
 import hashlib
 import chromadb
 import logging
+import nltk
 from chromadb.config import Settings
 from chromadb.api.segment import API
 from typing import List
@@ -41,6 +42,12 @@ from langchain.document_loaders import (
     UnstructuredWordDocumentLoader,
 )
 
+try:
+    nltk.data.find('punkt')
+    nltk.data.find('averaged_perceptron_tagger')
+except LookupError:
+    nltk.download('punkt')
+    nltk.data.find('averaged_perceptron_tagger')
 
 class MyEmlLoader(UnstructuredEmailLoader):
     """Wrapper to fallback to text/plain when default does not work"""
@@ -123,7 +130,6 @@ class ChatBot:
             # Add more mappings for other file extensions and loaders as needed
         }
         self.payload = None
-        #self.assimilate()
 
     def set_chromadb_directory(self, directory):
         self.persist_directory = f'{directory}/chromadb'
