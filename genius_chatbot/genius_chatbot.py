@@ -11,12 +11,12 @@ import glob
 import hashlib
 import chromadb
 import logging
+import nltk
 from chromadb.config import Settings
 from chromadb.api.segment import API
 from typing import List
 from multiprocessing import Pool
 from tqdm import tqdm
-from agent_protocol import Agent, Step, Task
 from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -42,6 +42,12 @@ from langchain.document_loaders import (
     UnstructuredWordDocumentLoader,
 )
 
+try:
+    nltk.data.find('punkt')
+    nltk.data.find('averaged_perceptron_tagger')
+except LookupError:
+    nltk.download('punkt')
+    nltk.data.find('averaged_perceptron_tagger')
 
 class MyEmlLoader(UnstructuredEmailLoader):
     """Wrapper to fallback to text/plain when default does not work"""
@@ -390,21 +396,6 @@ def usage():
           f'\t--json\n')
 
 
-async def task_handler(task: Task) -> None:
-    # TODO: Create initial step(s) for the task
-    await Agent.db.create_step(task.task_id, ...)
-
-
-async def step_handler(step: Step) -> Step:
-    # TODO: handle next step
-    if step.name == "print":
-        print(step.input)
-        step.is_last = True
-
-    step.output = "Output from the agent"
-    return step
-
-
 def genius_chatbot(argv):
     geniusbot_chat = ChatBot()
     run_flag = False
@@ -517,8 +508,6 @@ def genius_chatbot(argv):
                   f"Sources: {response['sources']}\n\n")
             logging.info('RAM Utilization After Loading Model')
         geniusbot_chat.check_hardware()
-
-    Agent.setup_agent(task_handler, step_handler).start()
 
 
 def main():
