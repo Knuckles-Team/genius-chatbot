@@ -47,7 +47,7 @@ try:
     nltk.data.find('averaged_perceptron_tagger')
 except LookupError:
     nltk.download('punkt')
-    nltk.data.find('averaged_perceptron_tagger')
+    nltk.download('averaged_perceptron_tagger')
 
 class MyEmlLoader(UnstructuredEmailLoader):
     """Wrapper to fallback to text/plain when default does not work"""
