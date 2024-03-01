@@ -13,21 +13,21 @@ import chromadb
 import logging
 import nltk
 from chromadb.config import Settings
-from chromadb.api.segment import API
+from chromadb.api.segment import SegmentAPI
 from typing import List
 from multiprocessing import Pool
 from tqdm import tqdm
-from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.llms import GPT4All, LlamaCpp
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores.pgvector import PGVector
 from langchain.docstore.document import Document
-from langchain.document_loaders import (
+from langchain_community.llms import OpenAI
+from langchain_community.llms import GPT4All, LlamaCpp
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings.openai import OpenAIEmbeddings
+from langchain_community.vectorstores.pgvector import PGVector
+from langchain_community.document_loaders import (
     CSVLoader,
     EverNoteLoader,
     PyMuPDFLoader,
@@ -42,12 +42,6 @@ from langchain.document_loaders import (
     UnstructuredWordDocumentLoader,
 )
 
-try:
-    nltk.data.find('punkt')
-    nltk.data.find('averaged_perceptron_tagger')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('averaged_perceptron_tagger')
 
 class MyEmlLoader(UnstructuredEmailLoader):
     """Wrapper to fallback to text/plain when default does not work"""
@@ -86,10 +80,10 @@ class ChatBot:
         self.source_directory = self.module_path
         self.openai_api_base = ""
         self.openai_api_key = False
-        self.model = "llama-2-7b-chat.ggmlv3.q4_0.bin" #"nous-hermes-13b.ggmlv3.q4_0.bin"
+        self.model = "orca-mini-3b-gguf2-q4_0.gguf"
         self.model_path = os.path.normpath(os.path.join(self.model_directory, self.model))
         self.model_engine = "GPT4All"
-        self.embeddings_model_name = "all-mpnet-base-v2"
+        self.embeddings_model_name = "all-MiniLM-L6-v2"
         self.embeddings = HuggingFaceEmbeddings(model_name=self.embeddings_model_name)
         self.chunk_overlap = 69
         self.chunk_size = 639
@@ -225,7 +219,7 @@ class ChatBot:
 
     def assimilate(self):
         if self.vectorstore == "chromadb":
-            chromadb_client = chromadb.PersistentClient(settings=self.chroma_settings , path=self.persist_directory)
+            chromadb_client = chromadb.PersistentClient(settings=self.chroma_settings, path=self.persist_directory)
             if self.does_vectorstore_exist():
                 # Update and store locally vectorstore
                 print(f"Appending to existing vectorstore at {self.persist_directory}")
@@ -290,7 +284,7 @@ class ChatBot:
 
         raise ValueError(f"Unsupported file extension '{ext}'")
 
-    def load_documents(self, source_dir: str, ignored_files: List[str] = []):
+    def load_documents(self, source_dir: str, ignored_files: List[str] = List):
         all_files = []
         for ext in self.loader_mapping:
             all_files.extend(
@@ -309,7 +303,8 @@ class ChatBot:
 
         return documents
 
-    def generate_md5_checksum(self, file):
+    @staticmethod
+    def generate_md5_checksum(file):
         with open(file, 'rb') as file_to_check:
             # read contents of the file
             data = file_to_check.read()
@@ -329,7 +324,8 @@ class ChatBot:
         print(f"Split into {len(documents)} chunks of text (max. {self.chunk_size} tokens each)")
         return documents
 
-    def batch_chromadb_insertions(self, chromadb_client: API, documents: List[Document]) -> List[Document]:
+    @staticmethod
+    def batch_chromadb_insertions(chromadb_client: SegmentAPI, documents: List[Document]) -> List[Document]:
         # Get max batch size.
         max_batch_size = chromadb_client.max_batch_size
         for i in range(0, len(documents), max_batch_size):
@@ -337,7 +333,8 @@ class ChatBot:
 
     def does_vectorstore_exist(self) -> bool:
         if self.vectorstore == "chromadb":
-            db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings)
+            db = Chroma(persist_directory=self.persist_directory, embedding_function=self.embeddings,
+                        client_settings=self.chroma_settings, client=self.chromadb_client)
             if not db.get()['documents']:
                 return False
             return True
@@ -357,7 +354,6 @@ class ChatBot:
             if not db:
                 return False
             return True
-
 
 
 def usage():
@@ -380,7 +376,7 @@ def usage():
           f'   | --pgvector-driver    [ PGVector driver ]\n'
           f'-p | --prompt             [ Prompt for chatbot ]\n'
           f'   | --mute-stream        [ Mute stream of generation ]\n'
-          f'-m | --model              [ Model to use from GPT4All https://gpt4all.io/index.html ]\n'          
+          f'-m | --model              [ Model to use from GPT4All https://gpt4all.io/index.html ]\n'
           f'   | --max-token-limit    [ Maximum token to generate ]\n'
           f'   | --model-directory    [ Directory to store models ]\n'
           f'   | --model-engine       [ GPT4All, LlamaCPP, or OpenAI ]\n'
@@ -410,8 +406,8 @@ def genius_chatbot(argv):
                                     'embeddings-model=', 'model=', 'model-engine=',
                                     'model-directory=', 'chromadb-directory=',
                                     'openai-token=', 'openai-api=',
-                                    'pgvector-user=','pgvector-password=','pgvector-host=','pgvector-port=',
-                                    'pgvector-driver=','pgvector-database='])
+                                    'pgvector-user=', 'pgvector-password=', 'pgvector-host=', 'pgvector-port=',
+                                    'pgvector-driver=', 'pgvector-database='])
     except getopt.GetoptError as e:
         usage()
         logging.error("Error: {e}\nExiting...")
@@ -484,6 +480,14 @@ def genius_chatbot(argv):
             geniusbot_chat.model_n_ctx = int(arg)
         elif opt == '--mute-stream':
             geniusbot_chat.mute_stream_flag = True
+
+    # Download NLTK data
+    try:
+        nltk.data.find('punkt')
+        nltk.data.find('averaged_perceptron_tagger')
+    except LookupError:
+        nltk.download('punkt')
+        nltk.download('averaged_perceptron_tagger')
 
     if assimilate_flag:
         geniusbot_chat.assimilate()
