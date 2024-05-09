@@ -22,7 +22,7 @@
 
 *Version: 1.10.3*
 
-Chatbot that uses any hugging face model or OpenAI endpoint. 
+Chatbot that uses any hugging face model or OpenAI endpoint.
 
 Local vector store supported with ChromaDB, or connect to a PGVector database
 

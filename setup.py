@@ -9,41 +9,45 @@ import re
 from pip._internal.network.session import PipSession
 from pip._internal.req import parse_requirements
 
-readme = Path('README.md').read_text()
+readme = Path("README.md").read_text()
 version = __version__
-requirements = parse_requirements(os.path.join(os.path.dirname(__file__), 'requirements.txt'), session=PipSession())
+requirements = parse_requirements(
+    os.path.join(os.path.dirname(__file__), "requirements.txt"), session=PipSession()
+)
 readme = re.sub(r"Version: [0-9]*\.[0-9]*\.[0-9][0-9]*", f"Version: {version}", readme)
 with open("README.md", "w") as readme_file:
     readme_file.write(readme)
-description = 'Use huggingface models to create an intelligent and scalable chatbot'
+description = "Use huggingface models to create an intelligent and scalable chatbot"
 
 setup(
-    name='genius-chatbot',
+    name="genius-chatbot",
     version=f"{version}",
     description=description,
-    long_description=f'{readme}',
-    long_description_content_type='text/markdown',
-    url='https://github.com/Knuckles-Team/genius-chatbot',
+    long_description=f"{readme}",
+    long_description_content_type="text/markdown",
+    url="https://github.com/Knuckles-Team/genius-chatbot",
     author=__author__,
-    author_email='knucklessg1@gmail.com',
+    author_email="knucklessg1@gmail.com",
     maintainer=__author__,
-    maintainer_email='knucklessg1@gmail.com',
-    license='MIT',
-    packages=['genius_chatbot'],
+    maintainer_email="knucklessg1@gmail.com",
+    license="MIT",
+    packages=["genius_chatbot"],
     include_package_data=True,
     install_requires=[str(requirement.requirement) for requirement in requirements],
-    py_modules=['genius_chatbot'],
-    package_data={'genius_chatbot': ['genius_chatbot']},
+    py_modules=["genius_chatbot"],
+    package_data={"genius_chatbot": ["genius_chatbot"]},
     classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'License :: Public Domain',
-        'Environment :: Console',
-        'Operating System :: POSIX :: Linux',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11',
-        'Programming Language :: Python :: 3.12',
+        "Development Status :: 5 - Production/Stable",
+        "License :: Public Domain",
+        "Environment :: Console",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
-    entry_points={'console_scripts': ['genius-chatbot = genius_chatbot.genius_chatbot:main']},
+    entry_points={
+        "console_scripts": ["genius-chatbot = genius_chatbot.genius_chatbot:main"]
+    },
 )
